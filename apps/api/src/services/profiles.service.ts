@@ -114,7 +114,7 @@ export async function updateAntreprenorProfile(input: UpdateAntreprenorProfileIn
 
 export async function getPublicElevProfile(userId: string, viewerId: string) {
   const user = await prisma.user.findUnique({
-    where: { id: userId, isDeleted: false },
+    where: { id: userId },
     select: {
       id: true, plan: true, createdAt: true,
       profileElev: {
@@ -148,7 +148,10 @@ export async function getPublicElevProfile(userId: string, viewerId: string) {
       _count: { select: { ideas: true, collaborationsAsElev: true } },
     },
   });
-  if (!user || !user.profileElev) throw Object.assign(new Error('Profil negăsit.'), { status: 404 });
+  if (!user) throw Object.assign(new Error('Profil negăsit.'), { status: 404 });
+
+  // Nu verificăm blocarea pentru profilul propriu
+  if (userId === viewerId) return user;
 
   // Verificăm dacă viewerul a blocat sau a fost blocat
   const blocked = await prisma.blockedUser.findFirst({
@@ -170,7 +173,7 @@ export async function getPublicElevProfile(userId: string, viewerId: string) {
 
 export async function getPublicAntreprenorProfile(userId: string, viewerId: string) {
   const user = await prisma.user.findUnique({
-    where: { id: userId, isDeleted: false },
+    where: { id: userId },
     select: {
       id: true, plan: true, createdAt: true,
       profileAntreprenor: {
@@ -219,7 +222,9 @@ export async function getPublicAntreprenorProfile(userId: string, viewerId: stri
       },
     },
   });
-  if (!user || !user.profileAntreprenor) throw Object.assign(new Error('Profil negăsit.'), { status: 404 });
+  if (!user) throw Object.assign(new Error('Profil negăsit.'), { status: 404 });
+
+  if (userId === viewerId) return user;
 
   const blocked = await prisma.blockedUser.findFirst({
     where: {

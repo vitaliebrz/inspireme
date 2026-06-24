@@ -337,10 +337,10 @@ export default function ProfilePage() {
       </div>
 
       {/* Idei elev */}
-      {isElev && (profile as ElevProfile).ideas.length > 0 && (
+      {isElev && ((profile as ElevProfile).ideas?.length ?? 0) > 0 && (
         <Section title="Idei publicate">
           <div className="space-y-2">
-            {(profile as ElevProfile).ideas.map((idea) => (
+            {((profile as ElevProfile).ideas ?? []).map((idea) => (
               <Link key={idea.id} to={`/idea/${idea.id}`}
                 className="flex items-center gap-3 px-4 py-3 rounded-xl hover:opacity-80 transition-opacity"
                 style={{ backgroundColor: 'var(--bg-3)' }}>
@@ -361,10 +361,10 @@ export default function ProfilePage() {
       )}
 
       {/* Colaborări */}
-      {isElev && (profile as ElevProfile).collaborationsAsElev.length > 0 && (
+      {isElev && ((profile as ElevProfile).collaborationsAsElev?.length ?? 0) > 0 && (
         <Section title="Colaborări">
           <div className="space-y-2">
-            {(profile as ElevProfile).collaborationsAsElev.map((collab, i) => {
+            {((profile as ElevProfile).collaborationsAsElev ?? []).map((collab, i) => {
               const ap = collab.antreprenor.profileAntreprenor;
               const name = ap ? `${ap.firstName} ${ap.lastName}` : 'Antreprenor';
               return (
@@ -388,10 +388,10 @@ export default function ProfilePage() {
       )}
 
       {/* Antreprenor — giveaways + investiții */}
-      {!isElev && (profile as AntreprenorProfile).giveawaysCreated.length > 0 && (
+      {!isElev && ((profile as AntreprenorProfile).giveawaysCreated?.length ?? 0) > 0 && (
         <Section title="Giveaway-uri lansate">
           <div className="space-y-2">
-            {(profile as AntreprenorProfile).giveawaysCreated.map((g) => (
+            {((profile as AntreprenorProfile).giveawaysCreated ?? []).map((g) => (
               <Link key={g.id} to={`/giveaways/${g.id}`}
                 className="flex items-center gap-3 px-4 py-3 rounded-xl hover:opacity-80 transition-opacity"
                 style={{ backgroundColor: 'var(--bg-3)' }}>
@@ -408,10 +408,10 @@ export default function ProfilePage() {
         </Section>
       )}
 
-      {!isElev && (profile as AntreprenorProfile).investmentHistory.length > 0 && (
+      {!isElev && ((profile as AntreprenorProfile).investmentHistory?.length ?? 0) > 0 && (
         <Section title="Istoricul investițiilor">
           <div className="space-y-2">
-            {(profile as AntreprenorProfile).investmentHistory.map((inv) => (
+            {((profile as AntreprenorProfile).investmentHistory ?? []).map((inv) => (
               <div key={inv.id} className="flex items-center gap-3 px-4 py-3 rounded-xl"
                 style={{ backgroundColor: 'var(--bg-3)' }}>
                 <div className="flex-1 min-w-0">

@@ -26,8 +26,19 @@ function handleError(err: unknown, res: Response) {
 // ─────────────────────────────────────────────
 router.get('/me', async (req: Request, res: Response) => {
   try {
-    const profile = await getMyProfile(req.user!.sub, req.user!.role as Role);
-    res.json(profile);
+    const userId = req.user!.sub;
+    const role = req.user!.role as Role;
+
+    let profile;
+    if (role === Role.ELEV) {
+      profile = await getPublicElevProfile(userId, userId);
+    } else if (role === Role.ANTREPRENOR) {
+      profile = await getPublicAntreprenorProfile(userId, userId);
+    } else {
+      profile = await getMyProfile(userId, role);
+    }
+
+    res.json({ ...profile, targetRole: role, email: req.user!.email });
   } catch (err) { handleError(err, res); }
 });
 
