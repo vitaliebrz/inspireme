@@ -101,16 +101,6 @@ export default function Topbar({ onMenuClick, sidebarOpen }: TopbarProps) {
           />
         </button>
 
-        {/* Toggle dark/light */}
-        <button
-          onClick={toggleTheme}
-          className="p-2 rounded-xl transition-colors"
-          style={{ color: 'var(--text-2)' }}
-          aria-label={theme === 'dark' ? 'Activează light mode' : 'Activează dark mode'}
-        >
-          {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
-        </button>
-
         {/* User menu */}
         <div className="relative" ref={userMenuRef}>
           <button
@@ -146,6 +136,16 @@ export default function Topbar({ onMenuClick, sidebarOpen }: TopbarProps) {
               >
                 <User size={16} />
                 Profilul meu
+              </button>
+
+              <button
+                onClick={toggleTheme}
+                className="flex items-center gap-2 w-full px-4 py-2.5 text-sm transition-colors text-left"
+                style={{ color: 'var(--text)' }}
+                aria-label={theme === 'dark' ? 'Activează light mode' : 'Activează dark mode'}
+              >
+                {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+                {theme === 'dark' ? 'Light mode' : 'Dark mode'}
               </button>
 
               <button
