@@ -25,16 +25,17 @@ export async function getMyProfile(userId: string, role: Role) {
       } : false,
       _count: {
         select: {
-          ideas: role === Role.ELEV,
-          collaborationsAsElev: role === Role.ELEV,
-          collaborationsAsAntreprenor: role === Role.ANTREPRENOR,
-          giveawaysCreated: role === Role.ANTREPRENOR,
+          ideas: true,
+          collaborationsAsElev: true,
+          collaborationsAsAntreprenor: true,
+          giveawaysCreated: true,
+          feedbackGiven: true,
         },
       },
     },
   });
   if (!user) throw Object.assign(new Error('Utilizator negăsit.'), { status: 404 });
-  return user;
+  return { ...user, targetRole: role as string };
 }
 
 // ─────────────────────────────────────────────

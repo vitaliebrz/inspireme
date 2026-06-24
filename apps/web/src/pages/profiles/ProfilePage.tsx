@@ -9,8 +9,16 @@ import { useAuth } from '../../context/AuthContext';
 
 type ApiError = { response?: { data?: { error?: string } } };
 
+interface ProfileCount {
+  ideas?: number;
+  collaborationsAsElev?: number;
+  collaborationsAsAntreprenor?: number;
+  giveawaysCreated?: number;
+  feedbackGiven?: number;
+}
+
 interface ElevProfile {
-  id: string; plan: string; createdAt: string; targetRole: 'ELEV';
+  id: string; plan: string; createdAt: string; role?: string; targetRole?: string;
   profileElev: {
     firstName: string; lastName: string; school: string | null; class: string | null;
     city: string | null; bio: string | null; interests: string[]; avatarUrl: string | null;
@@ -27,11 +35,11 @@ interface ElevProfile {
       profileAntreprenor: { firstName: string; lastName: string; company: string | null; avatarUrl: string | null } | null;
     };
   }[];
-  _count: { ideas: number; collaborationsAsElev: number };
+  _count: ProfileCount;
 }
 
 interface AntreprenorProfile {
-  id: string; plan: string; createdAt: string; targetRole: 'ANTREPRENOR';
+  id: string; plan: string; createdAt: string; role?: string; targetRole?: string;
   profileAntreprenor: {
     firstName: string; lastName: string; company: string | null; position: string | null;
     domain: string | null; website: string | null; bioMentor: string | null;
@@ -47,7 +55,7 @@ interface AntreprenorProfile {
     id: string; investmentType: string; amountDescription: string | null; status: string; createdAt: string;
     idea: { id: string; title: string } | null;
   }[];
-  _count: { collaborationsAsAntreprenor: number; giveawaysCreated: number; feedbackGiven: number };
+  _count: ProfileCount;
 }
 
 type ProfileData = ElevProfile | AntreprenorProfile;
@@ -86,7 +94,8 @@ export default function ProfilePage() {
       .then(({ data }) => {
         setProfile(data);
         if (isOwn) {
-          const p = data.targetRole === 'ELEV'
+          const dataRole = data.targetRole ?? data.role;
+          const p = dataRole === 'ELEV'
             ? (data as ElevProfile).profileElev
             : (data as AntreprenorProfile).profileAntreprenor;
           if (p) setForm(p as unknown as Record<string, string>);
@@ -120,7 +129,7 @@ export default function ProfilePage() {
       });
       setProfile((prev) => {
         if (!prev) return prev;
-        if (prev.targetRole === 'ELEV') {
+        if ((prev.targetRole ?? prev.role) === 'ELEV') {
           return { ...prev, profileElev: { ...(prev as ElevProfile).profileElev!, avatarUrl: data.avatarUrl } };
         }
         return { ...prev, profileAntreprenor: { ...(prev as AntreprenorProfile).profileAntreprenor!, avatarUrl: data.avatarUrl } };
@@ -150,7 +159,7 @@ export default function ProfilePage() {
     );
   }
 
-  const isElev = profile.targetRole === 'ELEV';
+  const isElev = (profile.targetRole ?? profile.role) === 'ELEV';
   const p = isElev ? (profile as ElevProfile).profileElev : (profile as AntreprenorProfile).profileAntreprenor;
   const displayName = p ? `${p.firstName} ${p.lastName}` : 'Utilizator';
   const avatarUrl = p?.avatarUrl ?? null;
