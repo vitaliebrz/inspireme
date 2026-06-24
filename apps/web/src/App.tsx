@@ -16,6 +16,8 @@ const IdeaDetailPage = lazy(() => import('./pages/ideas/IdeaDetailPage'));
 const IdeaNewPage = lazy(() => import('./pages/ideas/IdeaNewPage'));
 const ChatPage = lazy(() => import('./pages/chat/ChatPage'));
 const GiveawaysPage = lazy(() => import('./pages/giveaways/GiveawaysPage'));
+const GiveawayDetailPage = lazy(() => import('./pages/giveaways/GiveawayDetailPage'));
+const GiveawayNewPage = lazy(() => import('./pages/giveaways/GiveawayNewPage'));
 const SubscriptionsPage = lazy(() => import('./pages/subscriptions/SubscriptionsPage'));
 const ProfilePage = lazy(() => import('./pages/profiles/ProfilePage'));
 const NotificationsPage = lazy(() => import('./pages/notifications/NotificationsPage'));
@@ -78,6 +80,8 @@ export default function App() {
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/chat/:conversationId" element={<ChatPage />} />
           <Route path="/giveaways" element={<GiveawaysPage />} />
+          <Route path="/giveaways/new" element={<GiveawayNewPage />} />
+          <Route path="/giveaways/:id" element={<GiveawayDetailPage />} />
           <Route path="/subscriptions" element={<SubscriptionsPage />} />
           <Route path="/profile/me" element={<ProfilePage />} />
           <Route path="/profile/:id" element={<ProfilePage />} />
