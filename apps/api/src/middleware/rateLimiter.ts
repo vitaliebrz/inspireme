@@ -33,6 +33,7 @@ function getIp(req: Request): string {
 
 function makeMiddleware(limiter: Ratelimit) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if (process.env['NODE_ENV'] !== 'production') { next(); return; }
     try {
       const { success, limit, remaining, reset } = await limiter.limit(getIp(req));
       res.setHeader('X-RateLimit-Limit', limit);
