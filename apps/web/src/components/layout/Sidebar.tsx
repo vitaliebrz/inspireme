@@ -51,12 +51,13 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
       )}
 
       <aside
-        className="fixed top-0 left-0 z-30 h-screen flex flex-col transition-transform duration-300 lg:translate-x-0"
+        className={`fixed top-0 left-0 z-30 h-screen flex flex-col transition-transform duration-300 lg:translate-x-0 ${
+          open ? 'translate-x-0' : '-translate-x-full'
+        }`}
         style={{
           width: 240,
           backgroundColor: 'var(--bg-2)',
           borderRight: '1px solid var(--border)',
-          transform: open ? 'translateX(0)' : undefined,
         }}
       >
         {/* Logo */}

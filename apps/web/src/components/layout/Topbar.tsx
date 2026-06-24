@@ -1,14 +1,15 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Menu, Search, Bell, Sun, Moon, LogOut, User } from 'lucide-react';
+import { Menu, X, Search, Bell, Sun, Moon, LogOut, User } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 
 interface TopbarProps {
   onMenuClick: () => void;
+  sidebarOpen?: boolean;
 }
 
-export default function Topbar({ onMenuClick }: TopbarProps) {
+export default function Topbar({ onMenuClick, sidebarOpen }: TopbarProps) {
   const { theme, toggleTheme } = useTheme();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -36,23 +37,30 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
 
   return (
     <header
-      className="fixed top-0 right-0 z-10 flex items-center gap-3 px-4 lg:px-6"
+      className="fixed top-0 left-0 right-0 lg:left-60 z-10 flex items-center gap-3 px-4 lg:px-6"
       style={{
-        left: 240,
         height: 56,
         backgroundColor: 'var(--bg)',
         borderBottom: '1px solid var(--border)',
       }}
     >
-      {/* Hamburger — mobil */}
+      {/* Burger / X — mobil */}
       <button
         onClick={onMenuClick}
         className="lg:hidden p-2 rounded-lg transition-colors"
         style={{ color: 'var(--text-2)' }}
-        aria-label="Deschide meniu"
+        aria-label={sidebarOpen ? 'Închide meniu' : 'Deschide meniu'}
       >
-        <Menu size={20} />
+        {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
       </button>
+
+      {/* Logo — vizibil pe mobile (sidebar-ul e ascuns) */}
+      <span
+        className="lg:hidden text-base font-extrabold tracking-tight mr-2"
+        style={{ color: 'var(--orange)' }}
+      >
+        InspireMe
+      </span>
 
       {/* Search */}
       <div className="flex-1 max-w-md relative">

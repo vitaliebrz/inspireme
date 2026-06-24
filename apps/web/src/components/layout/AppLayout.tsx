@@ -10,24 +10,14 @@ export default function AppLayout() {
     <div className="min-h-screen" style={{ backgroundColor: 'var(--bg)' }}>
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-      {/* Topbar — offset sidebar pe desktop */}
-      <Topbar onMenuClick={() => setSidebarOpen(true)} />
+      <Topbar
+        onMenuClick={() => setSidebarOpen((v) => !v)}
+        sidebarOpen={sidebarOpen}
+      />
 
-      {/* Conținut principal */}
-      <main
-        className="min-h-screen"
-        style={{
-          marginLeft: 240,
-          paddingTop: 56,
-        }}
-      >
-        {/* Pe mobil, sidebar-ul e overlay, deci nu facem offset */}
-        <div
-          className="p-6"
-          style={{
-            // Pe ecrane mici resetăm marginea stânga
-          }}
-        >
+      {/* Pe mobile: fără offset (sidebar e overlay). Pe desktop: offset 240px */}
+      <main className="min-h-screen lg:ml-60" style={{ paddingTop: 56 }}>
+        <div className="p-4 lg:p-6">
           <Outlet />
         </div>
       </main>
