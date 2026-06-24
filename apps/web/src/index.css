@@ -1,1 +1,97 @@
 @import "tailwindcss";
+
+/* ── Culori dark mode (implicit) ── */
+:root,
+[data-theme="dark"] {
+  --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --bg:       #0f1117;
+  --bg-2:     #161b27;
+  --bg-3:     #1e2535;
+  --bg-4:     #252d40;
+  --border:   rgba(255, 255, 255, 0.08);
+  --text:     #f0f2f8;
+  --text-2:   #8892a4;
+  --navy:     #2d3748;
+  --orange:   #f6a623;
+  --orange-2: #e8951a;
+}
+
+/* ── Culori light mode ── */
+[data-theme="light"] {
+  --bg:     #f4f6fa;
+  --bg-2:   #ffffff;
+  --bg-3:   #eef1f7;
+  --bg-4:   #e4e8f0;
+  --border: rgba(0, 0, 0, 0.08);
+  --text:   #1a202c;
+  --text-2: #4a5568;
+}
+
+/* ── Reset & base ── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background-color: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Scrollbar custom ── */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-2);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--bg-4);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-2);
+}
+
+/* ── Skeleton shimmer animație ── */
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-3) 25%,
+    var(--bg-4) 50%,
+    var(--bg-3) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 8px;
+}
+
+/* ── Focus visible global ── */
+:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ── Utilitare CSS vars pentru Tailwind arbitrary values ── */
+.bg-bg     { background-color: var(--bg); }
+.bg-bg-2   { background-color: var(--bg-2); }
+.bg-bg-3   { background-color: var(--bg-3); }
+.bg-bg-4   { background-color: var(--bg-4); }
+.text-main { color: var(--text); }
+.text-muted { color: var(--text-2); }
+.border-default { border-color: var(--border); }
