@@ -42,9 +42,13 @@ export async function getIdeasFeed(opts: FeedIdeiOptions) {
   const { userId, category, cursor } = opts;
 
   if (!cursor) {
-    const cacheKey = REDIS_KEYS.feedCache(category ?? 'ALL', 'first');
-    const cached = await redis.get<string>(cacheKey);
-    if (cached) return JSON.parse(cached) as unknown;
+    try {
+      const cacheKey = REDIS_KEYS.feedCache(category ?? 'ALL', 'first');
+      const cached = await redis.get<string>(cacheKey);
+      if (cached) return JSON.parse(cached) as unknown;
+    } catch {
+      // Redis indisponibil — continuăm cu interogarea DB
+    }
   }
 
   const blockedRows = await prisma.blockedUser.findMany({
@@ -118,8 +122,12 @@ export async function getIdeasFeed(opts: FeedIdeiOptions) {
   const result = { items, nextCursor, hasNextPage };
 
   if (!cursor) {
-    const cacheKey = REDIS_KEYS.feedCache(category ?? 'ALL', 'first');
-    await redis.set(cacheKey, JSON.stringify(result), { ex: REDIS_TTL.feed });
+    try {
+      const cacheKey = REDIS_KEYS.feedCache(category ?? 'ALL', 'first');
+      await redis.set(cacheKey, JSON.stringify(result), { ex: REDIS_TTL.feed });
+    } catch {
+      // Redis indisponibil — rezultatul nu se cacheaza, continuăm
+    }
   }
 
   return result;
@@ -133,9 +141,13 @@ export async function getAntreprenoriFeed(opts: FeedAntreprenoriOptions) {
   const { userId, cursor } = opts;
 
   if (!cursor) {
-    const cacheKey = REDIS_KEYS.feedCache('antreprenori', 'first');
-    const cached = await redis.get<string>(cacheKey);
-    if (cached) return JSON.parse(cached) as unknown;
+    try {
+      const cacheKey = REDIS_KEYS.feedCache('antreprenori', 'first');
+      const cached = await redis.get<string>(cacheKey);
+      if (cached) return JSON.parse(cached) as unknown;
+    } catch {
+      // Redis indisponibil — continuăm cu interogarea DB
+    }
   }
 
   const blockedRows = await prisma.blockedUser.findMany({
@@ -212,8 +224,12 @@ export async function getAntreprenoriFeed(opts: FeedAntreprenoriOptions) {
   const result = { items, nextCursor, hasNextPage };
 
   if (!cursor) {
-    const cacheKey = REDIS_KEYS.feedCache('antreprenori', 'first');
-    await redis.set(cacheKey, JSON.stringify(result), { ex: REDIS_TTL.feed });
+    try {
+      const cacheKey = REDIS_KEYS.feedCache('antreprenori', 'first');
+      await redis.set(cacheKey, JSON.stringify(result), { ex: REDIS_TTL.feed });
+    } catch {
+      // Redis indisponibil — continuăm fără cache
+    }
   }
 
   return result;
@@ -224,8 +240,12 @@ export async function getAntreprenoriFeed(opts: FeedAntreprenoriOptions) {
 // ─────────────────────────────────────────────
 
 export async function getFeedStats() {
-  const cached = await redis.get<string>('feed:stats');
-  if (cached) return JSON.parse(cached) as unknown;
+  try {
+    const cached = await redis.get<string>('feed:stats');
+    if (cached) return JSON.parse(cached) as unknown;
+  } catch {
+    // Redis indisponibil — continuăm cu interogarea DB
+  }
 
   const [ideas, users, collabs, giveaways] = await Promise.all([
     prisma.idea.count({ where: { visibility: IdeaVisibility.PUBLIC, user: { isDeleted: false } } }),
@@ -235,6 +255,10 @@ export async function getFeedStats() {
   ]);
 
   const stats = { ideas, users, collabs, giveaways };
-  await redis.set('feed:stats', JSON.stringify(stats), { ex: 300 });
+  try {
+    await redis.set('feed:stats', JSON.stringify(stats), { ex: 300 });
+  } catch {
+    // Redis indisponibil — continuăm fără cache
+  }
   return stats;
 }

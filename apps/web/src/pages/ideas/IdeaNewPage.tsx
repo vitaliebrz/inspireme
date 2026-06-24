@@ -79,29 +79,37 @@ export default function IdeaNewPage() {
     setLoading(true);
 
     try {
-      // 1. Creăm ideea
+      // 1. Creăm ideea — eroare fatală, oprim fluxul
       const { data } = await api.post<{ id: string }>('/ideas', {
         title, category, problem, solution, targetAudience: targetAudience || undefined,
         tags, visibility,
       });
       const ideaId = data.id;
 
-      // 2. Upload imagini
+      // 2. Upload imagini — eroare non-fatală, navigăm la idee indiferent
       if (images.length > 0) {
-        const formData = new FormData();
-        images.forEach((img) => formData.append('images', img));
-        await api.post(`/ideas/${ideaId}/images`, formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
+        try {
+          const formData = new FormData();
+          images.forEach((img) => formData.append('images', img));
+          await api.post(`/ideas/${ideaId}/images`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          });
+        } catch {
+          // Ideea a fost creată, imaginile pot fi adăugate ulterior din pagina ideii
+        }
       }
 
-      // 3. Upload PDF
+      // 3. Upload PDF — eroare non-fatală
       if (pdf) {
-        const formData = new FormData();
-        formData.append('pdf', pdf);
-        await api.post(`/ideas/${ideaId}/pdf`, formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
+        try {
+          const formData = new FormData();
+          formData.append('pdf', pdf);
+          await api.post(`/ideas/${ideaId}/pdf`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          });
+        } catch {
+          // PDF-ul poate fi adăugat ulterior din pagina ideii
+        }
       }
 
       navigate(`/idea/${ideaId}`);

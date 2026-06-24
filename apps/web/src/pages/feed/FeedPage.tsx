@@ -53,12 +53,14 @@ export default function FeedPage({ tab }: FeedPageProps) {
   const [ideiCursor, setIdeiCursor] = useState<string | null>(null);
   const [ideiHasNext, setIdeiHasNext] = useState(false);
   const [ideiLoading, setIdeiLoading] = useState(false);
+  const [ideiError, setIdeiError] = useState(false);
 
   // Feed Antreprenori state
   const [antreprenori, setAntreprenori] = useState<AntreprenorCardData[]>([]);
   const [antrCursor, setAntrCursor] = useState<string | null>(null);
   const [antrHasNext, setAntrHasNext] = useState(false);
   const [antrLoading, setAntrLoading] = useState(false);
+  const [antrError, setAntrError] = useState(false);
 
   const loadingRef = useRef(false);
 
@@ -79,11 +81,12 @@ export default function FeedPage({ tab }: FeedPageProps) {
       if (cursor) params['cursor'] = cursor;
 
       const { data } = await api.get<FeedResult<IdeaCardData>>('/feed/ideas', { params });
+      setIdeiError(false);
       setIdeas((prev) => reset ? data.items : [...prev, ...data.items]);
       setIdeiCursor(data.nextCursor);
       setIdeiHasNext(data.hasNextPage);
     } catch {
-      // silent — vom arăta starea goală
+      setIdeiError(true);
     } finally {
       setIdeiLoading(false);
       loadingRef.current = false;
@@ -101,11 +104,12 @@ export default function FeedPage({ tab }: FeedPageProps) {
       if (cursor) params['cursor'] = cursor;
 
       const { data } = await api.get<FeedResult<AntreprenorCardData>>('/feed/antreprenori', { params });
+      setAntrError(false);
       setAntreprenori((prev) => reset ? data.items : [...prev, ...data.items]);
       setAntrCursor(data.nextCursor);
       setAntrHasNext(data.hasNextPage);
     } catch {
-      // silent
+      setAntrError(true);
     } finally {
       setAntrLoading(false);
       loadingRef.current = false;
@@ -113,15 +117,16 @@ export default function FeedPage({ tab }: FeedPageProps) {
   }, [antrCursor]);
 
   // Reset + reload când se schimbă tab-ul sau categoria
+  // Nu ștergem lista imediat — loadXxx(true) o va înlocui când datele sosesc
   useEffect(() => {
     loadingRef.current = false;
     if (activeTab === 'idei') {
-      setIdeas([]);
       setIdeiCursor(null);
+      setIdeiError(false);
       void loadIdeas(true);
     } else {
-      setAntreprenori([]);
       setAntrCursor(null);
+      setAntrError(false);
       void loadAntreprenori(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -239,10 +244,13 @@ export default function FeedPage({ tab }: FeedPageProps) {
               <div key={i} className="skeleton h-64 rounded-2xl" />
             ))}
           </div>
-          {!isLoading && ideas.length === 0 && (
+          {!ideiLoading && ideas.length === 0 && !ideiError && (
             <EmptyState
               message={category ? 'Nicio idee în această categorie.' : 'Nicio idee publicată încă. Fii primul!'}
             />
+          )}
+          {ideiError && !ideiLoading && (
+            <ErrorState onRetry={() => { setIdeiError(false); void loadIdeas(true); }} />
           )}
         </>
       ) : (
@@ -259,8 +267,11 @@ export default function FeedPage({ tab }: FeedPageProps) {
               <div key={i} className="skeleton h-44 rounded-2xl" />
             ))}
           </div>
-          {!isLoading && antreprenori.length === 0 && (
+          {!antrLoading && antreprenori.length === 0 && !antrError && (
             <EmptyState message="Niciun antreprenor înregistrat încă." />
+          )}
+          {antrError && !antrLoading && (
+            <ErrorState onRetry={() => { setAntrError(false); void loadAntreprenori(true); }} />
           )}
         </>
       )}
@@ -275,6 +286,23 @@ function EmptyState({ message }: { message: string }) {
   return (
     <div className="text-center py-16">
       <p className="text-base font-medium" style={{ color: 'var(--text-2)' }}>{message}</p>
+    </div>
+  );
+}
+
+function ErrorState({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="text-center py-16">
+      <p className="text-base font-medium mb-3" style={{ color: 'var(--text-2)' }}>
+        Nu s-au putut încărca datele. Verifică conexiunea.
+      </p>
+      <button
+        onClick={onRetry}
+        className="px-4 py-2 rounded-xl text-sm font-medium"
+        style={{ backgroundColor: 'var(--bg-3)', color: 'var(--text-2)', border: '1px solid var(--border)' }}
+      >
+        Încearcă din nou
+      </button>
     </div>
   );
 }
