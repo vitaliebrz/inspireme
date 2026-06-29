@@ -2,6 +2,7 @@ import { useState, FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import Logo from '../../components/Logo';
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -39,9 +40,7 @@ export default function LoginPage() {
         className="hidden lg:flex flex-col justify-between w-1/2 p-12"
         style={{ backgroundColor: 'var(--bg-2)' }}
       >
-        <span className="text-2xl font-extrabold" style={{ color: 'var(--orange)' }}>
-          InspireMe
-        </span>
+        <Logo height={36} />
         <div>
           <h2 className="text-4xl font-bold leading-tight mb-4" style={{ color: 'var(--text)' }}>
             Conectează-te cu antreprenorii care îți pot transforma ideea în realitate.
@@ -58,10 +57,10 @@ export default function LoginPage() {
       {/* Formular dreapta */}
       <div className="flex-1 flex items-center justify-center p-6">
         <div className="w-full max-w-sm">
-          {/* Logo mobil */}
-          <p className="lg:hidden text-xl font-extrabold mb-8 text-center" style={{ color: 'var(--orange)' }}>
-            InspireMe
-          </p>
+          {/* Logo centrat deasupra formularului — vizibil pe toate dimensiunile */}
+          <div className="flex justify-center mb-8">
+            <Logo height={40} />
+          </div>
 
           <h1 className="text-2xl font-bold mb-1" style={{ color: 'var(--text)' }}>
             Bun revenit!

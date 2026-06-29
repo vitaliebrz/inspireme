@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Menu, X, Search, Bell, Sun, Moon, LogOut, User } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import Logo from '../Logo';
 
 interface TopbarProps {
   onMenuClick: () => void;
@@ -55,12 +56,7 @@ export default function Topbar({ onMenuClick, sidebarOpen }: TopbarProps) {
       </button>
 
       {/* Logo — vizibil pe mobile (sidebar-ul e ascuns) */}
-      <span
-        className="lg:hidden text-base font-extrabold tracking-tight mr-2"
-        style={{ color: 'var(--orange)' }}
-      >
-        InspireMe
-      </span>
+      <Logo height={28} className="lg:hidden mr-2" />
 
       {/* Search */}
       <div className="flex-1 max-w-md relative">

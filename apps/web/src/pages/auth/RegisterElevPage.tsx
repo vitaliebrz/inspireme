@@ -2,6 +2,7 @@ import { useState, FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, Loader2, Check, X } from 'lucide-react';
 import { api } from '../../lib/api';
+import Logo from '../../components/Logo';
 
 const INTERESTS = ['Tech', 'Eco', 'Artă', 'Educație', 'Social', 'Sănătate', 'Food', 'Finanțe'];
 
@@ -68,8 +69,8 @@ export default function RegisterElevPage() {
       <div className="w-full max-w-md">
         {/* Header */}
         <div className="text-center mb-8">
-          <Link to="/" className="text-2xl font-extrabold" style={{ color: 'var(--orange)' }}>InspireMe</Link>
-          <h1 className="text-xl font-bold mt-4" style={{ color: 'var(--text)' }}>Creează cont de elev</h1>
+          <Link to="/" className="inline-block mb-4"><Logo height={40} /></Link>
+          <h1 className="text-xl font-bold" style={{ color: 'var(--text)' }}>Creează cont de elev</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--text-2)' }}>Pasul {step} din 2</p>
         </div>
 

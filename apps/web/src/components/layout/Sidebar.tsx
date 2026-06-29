@@ -4,6 +4,7 @@ import {
   User, Bell, ShieldCheck, Lightbulb, X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import Logo from '../Logo';
 
 interface SidebarProps {
   open: boolean;
@@ -65,9 +66,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
           className="flex items-center justify-between px-5 h-14 shrink-0"
           style={{ borderBottom: '1px solid var(--border)' }}
         >
-          <span className="text-lg font-extrabold tracking-tight" style={{ color: 'var(--orange)' }}>
-            InspireMe
-          </span>
+          <Logo height={32} />
           <button
             onClick={onClose}
             className="lg:hidden p-1 rounded-lg transition-colors"

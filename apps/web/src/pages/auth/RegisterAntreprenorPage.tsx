@@ -2,6 +2,7 @@ import { useState, FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import { api } from '../../lib/api';
+import Logo from '../../components/Logo';
 
 const DOMAINS = ['Tech', 'Eco', 'Retail', 'Educație', 'Finanțe', 'Sănătate', 'Social', 'Food', 'Alt domeniu'];
 
@@ -55,8 +56,8 @@ export default function RegisterAntreprenorPage() {
     <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: 'var(--bg)' }}>
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <Link to="/" className="text-2xl font-extrabold" style={{ color: 'var(--orange)' }}>InspireMe</Link>
-          <h1 className="text-xl font-bold mt-4" style={{ color: 'var(--text)' }}>Cont de antreprenor</h1>
+          <Link to="/" className="inline-block mb-4"><Logo height={40} /></Link>
+          <h1 className="text-xl font-bold" style={{ color: 'var(--text)' }}>Cont de antreprenor</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--text-2)' }}>
             Evaluează idei și investește în viitorul României.
           </p>
