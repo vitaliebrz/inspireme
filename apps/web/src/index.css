@@ -18,13 +18,13 @@
 
 /* ── Culori light mode ── */
 [data-theme="light"] {
-  --bg:     #f4f6fa;
-  --bg-2:   #ffffff;
-  --bg-3:   #eef1f7;
-  --bg-4:   #e4e8f0;
-  --border: rgba(0, 0, 0, 0.08);
-  --text:   #1a202c;
-  --text-2: #4a5568;
+  --bg:     #e8ecf4;
+  --bg-2:   #f4f7fc;
+  --bg-3:   #dde3ef;
+  --bg-4:   #cfd7e8;
+  --border: rgba(0, 0, 0, 0.13);
+  --text:   #0f172a;
+  --text-2: #374151;
 }
 
 /* ── Reset & base ── */
