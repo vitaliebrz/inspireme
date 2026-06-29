@@ -57,8 +57,8 @@ export default function LoginPage() {
       {/* Formular dreapta */}
       <div className="flex-1 flex items-center justify-center p-6">
         <div className="w-full max-w-sm">
-          {/* Logo centrat deasupra formularului — vizibil pe toate dimensiunile */}
-          <div className="flex justify-center mb-8">
+          {/* Logo centrat — vizibil doar pe mobile (pe desktop e în panoul stâng) */}
+          <div className="lg:hidden flex justify-center mb-8">
             <Logo height={40} />
           </div>
 
