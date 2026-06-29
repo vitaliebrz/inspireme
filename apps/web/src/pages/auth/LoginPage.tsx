@@ -42,7 +42,7 @@ export default function LoginPage() {
       >
         {/* Logo + tagline centrate vertical în panou */}
         <div className="flex-1 flex flex-col justify-center">
-          <Logo height={36} className="mb-6" />
+          <Logo height={90} className="mb-8" />
           <h2 className="text-4xl font-bold leading-tight mb-4" style={{ color: 'var(--text)' }}>
             Conectează-te cu antreprenorii care îți pot transforma ideea în realitate.
           </h2>
