@@ -37,11 +37,12 @@ export default function LoginPage() {
     <div className="min-h-screen flex" style={{ backgroundColor: 'var(--bg)' }}>
       {/* Panou decorativ stânga — desktop only */}
       <div
-        className="hidden lg:flex flex-col justify-between w-1/2 p-12"
+        className="hidden lg:flex flex-col w-1/2 p-12"
         style={{ backgroundColor: 'var(--bg-2)' }}
       >
-        <Logo height={36} />
-        <div>
+        {/* Logo + tagline centrate vertical în panou */}
+        <div className="flex-1 flex flex-col justify-center">
+          <Logo height={36} className="mb-6" />
           <h2 className="text-4xl font-bold leading-tight mb-4" style={{ color: 'var(--text)' }}>
             Conectează-te cu antreprenorii care îți pot transforma ideea în realitate.
           </h2>
