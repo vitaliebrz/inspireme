@@ -38,26 +38,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     timers.current.set(id, setTimeout(() => remove(id), 4500));
   }, [remove]);
 
+  // Stilul complet e aplicat DIRECT pe #toast-root în index.html (înainte de orice JS/React)
+  // → nu depindem de React pentru positioning, evităm orice timing/stacking issue pe mobile
   const toastRoot = document.getElementById('toast-root') ?? document.body;
   const portal = createPortal(
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      right: 0,
-      // env() pentru notch/Dynamic Island pe iOS (viewport-fit=cover în index.html)
-      paddingTop: 'max(16px, env(safe-area-inset-top, 16px))',
-      paddingRight: 'max(16px, env(safe-area-inset-right, 16px))',
-      // 2147483647 = max CSS z-index; depășim orice modal/backdrop
-      zIndex: 2147483647,
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 8,
-      width: 'min(340px, calc(100vw - 32px))',
-      pointerEvents: 'none',
-      // translateZ(0) forțează GPU compositing layer —
-      // fix pentru iOS Safari care clipă position:fixed când body are overflow:hidden
-      transform: 'translateZ(0)',
-    }}>
+    <>
       {toasts.map((t) => {
         const c = CONFIG[t.type];
         return (
@@ -85,7 +70,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           </div>
         );
       })}
-    </div>,
+    </>,
     toastRoot,
   );
 
