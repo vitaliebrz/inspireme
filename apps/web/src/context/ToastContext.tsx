@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useRef } from 'react';
+import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, CheckCircle, AlertCircle, Info } from 'lucide-react';
 
@@ -25,6 +25,38 @@ const CONFIG: Record<ToastType, { bg: string; border: string; iconColor: string;
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const timers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [ready, setReady] = useState(false);
+
+  // Creăm containerul via JavaScript — singura metodă garantată pe toate browserele mobile.
+  // Abordările cu portal la document.body sau inline HTML style eșuează pe iOS/Android
+  // din cauza overflow:hidden pe body (chat page) sau a CSS max()/env() nesuportate.
+  useEffect(() => {
+    const el = document.createElement('div');
+    el.setAttribute('id', 'inspireme-toasts');
+    el.style.cssText = [
+      'position:fixed',
+      'top:16px',
+      'right:16px',
+      'z-index:2147483647',
+      'display:flex',
+      'flex-direction:column',
+      'gap:8px',
+      'width:340px',
+      'max-width:calc(100vw - 32px)',
+      'pointer-events:none',
+      '-webkit-transform:translateZ(0)',
+      'transform:translateZ(0)',
+    ].join(';');
+    document.documentElement.appendChild(el); // <html>, nu <body> — evităm overflow:hidden pe body
+    containerRef.current = el;
+    setReady(true);
+    return () => {
+      if (document.documentElement.contains(el)) {
+        document.documentElement.removeChild(el);
+      }
+    };
+  }, []);
 
   const remove = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -38,41 +70,40 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     timers.current.set(id, setTimeout(() => remove(id), 4500));
   }, [remove]);
 
-  // Stilul complet e aplicat DIRECT pe #toast-root în index.html (înainte de orice JS/React)
-  // → nu depindem de React pentru positioning, evităm orice timing/stacking issue pe mobile
-  const toastRoot = document.getElementById('toast-root') ?? document.body;
-  const portal = createPortal(
-    <>
-      {toasts.map((t) => {
-        const c = CONFIG[t.type];
-        return (
-          <div key={t.id} role="alert" style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: 10,
-            padding: '12px 14px',
-            borderRadius: 14,
-            backgroundColor: c.bg,
-            border: `1.5px solid ${c.border}`,
-            boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-            pointerEvents: 'all',
-          }}>
-            <span style={{ color: c.iconColor, flexShrink: 0, marginTop: 1 }}>{c.icon}</span>
-            <p style={{ margin: 0, flex: 1, fontSize: 14, fontWeight: 500, lineHeight: 1.4, color: '#f0f2f8' }}>
-              {t.message}
-            </p>
-            <button onClick={() => remove(t.id)} style={{
-              background: 'none', border: 'none', padding: 2, cursor: 'pointer',
-              color: '#8892a4', flexShrink: 0, display: 'flex', marginTop: 1,
-            }} aria-label="Închide">
-              <X size={14} />
-            </button>
-          </div>
-        );
-      })}
-    </>,
-    toastRoot,
-  );
+  const portal = ready && containerRef.current
+    ? createPortal(
+        <>
+          {toasts.map((t) => {
+            const c = CONFIG[t.type];
+            return (
+              <div key={t.id} role="alert" style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 10,
+                padding: '12px 14px',
+                borderRadius: 14,
+                backgroundColor: c.bg,
+                border: `1.5px solid ${c.border}`,
+                boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+                pointerEvents: 'all',
+              }}>
+                <span style={{ color: c.iconColor, flexShrink: 0, marginTop: 1 }}>{c.icon}</span>
+                <p style={{ margin: 0, flex: 1, fontSize: 14, fontWeight: 500, lineHeight: 1.4, color: '#f0f2f8' }}>
+                  {t.message}
+                </p>
+                <button onClick={() => remove(t.id)} style={{
+                  background: 'none', border: 'none', padding: 2, cursor: 'pointer',
+                  color: '#8892a4', flexShrink: 0, display: 'flex', marginTop: 1,
+                }} aria-label="Închide">
+                  <X size={14} />
+                </button>
+              </div>
+            );
+          })}
+        </>,
+        containerRef.current,
+      )
+    : null;
 
   return (
     <ToastContext.Provider value={{ toast }}>
