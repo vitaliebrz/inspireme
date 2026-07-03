@@ -149,6 +149,7 @@ export default function ChatPage() {
   const [groupName, setGroupName] = useState('');
   const [groupMemberSearch, setGroupMemberSearch] = useState('');
   const [groupMemberResults, setGroupMemberResults] = useState<UserSearchResult[]>([]);
+  const [groupMemberSuggestions, setGroupMemberSuggestions] = useState<UserSearchResult[]>([]);
   const [selectedMembers, setSelectedMembers] = useState<UserSearchResult[]>([]);
   const [searchingMembers, setSearchingMembers] = useState(false);
   const [creatingGroup, setCreatingGroup] = useState(false);
@@ -248,6 +249,15 @@ export default function ChatPage() {
       .then(({ data }) => setGroups(data.groups))
       .catch(() => {});
   }, []);
+
+  // La deschiderea modalului, încarcă sugestii din conversații (elevi cu care am interacționat)
+  useEffect(() => {
+    if (!showCreateGroup) return;
+    const excludeIds = selectedMembers.map((m) => m.id).join(',');
+    api.get<{ users: UserSearchResult[] }>(`/search/users/suggestions?exclude=${excludeIds}`)
+      .then(({ data }) => setGroupMemberSuggestions(data.users))
+      .catch(() => {});
+  }, [showCreateGroup, selectedMembers]);
 
   // Debounce search membri pentru modalul de creare grup
   useEffect(() => {
@@ -537,7 +547,7 @@ export default function ChatPage() {
 
   // Creare grup nou
   const handleCreateGroup = async () => {
-    if (!groupName.trim() || selectedMembers.length === 0 || creatingGroup) return;
+    if (!groupName.trim() || creatingGroup) return;
     setCreatingGroup(true);
     try {
       const { data } = await api.post<{ group: GroupItem }>('/groups', {
@@ -1600,52 +1610,73 @@ export default function ChatPage() {
                 />
               </div>
 
-              {/* Rezultate search */}
-              {(groupMemberResults.length > 0 || searchingMembers) && (
-                <div className="mt-1 rounded-xl overflow-hidden"
-                  style={{ border: '1px solid var(--border)', backgroundColor: 'var(--bg-3)' }}>
-                  {searchingMembers ? (
-                    <div className="flex items-center justify-center py-3">
-                      <Loader2 size={14} className="animate-spin" style={{ color: 'var(--text-2)' }} />
-                    </div>
-                  ) : groupMemberResults.map((u) => (
-                    <button
-                      key={u.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedMembers((prev) => [...prev, u]);
-                        setGroupMemberResults((prev) => prev.filter((r) => r.id !== u.id));
-                        setGroupMemberSearch('');
-                      }}
-                      className="w-full flex items-center gap-3 px-3 py-2.5 text-left"
-                      style={{ borderBottom: '1px solid var(--border)' }}
-                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-4)')}
-                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-                    >
-                      {u.avatarUrl
-                        ? <img src={u.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" loading="lazy" />
-                        : <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-                            style={{ backgroundColor: 'var(--bg-4)', color: 'var(--text-2)' }}>
-                            {initials(`${u.firstName} ${u.lastName}`)}
-                          </div>
-                      }
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-baseline gap-1.5">
-                          <p className="text-sm font-semibold truncate" style={{ color: 'var(--text)' }}>
-                            {u.firstName} {u.lastName}
-                          </p>
-                          {u.username && (
-                            <span className="text-xs shrink-0" style={{ color: 'var(--text-2)' }}>@{u.username}</span>
-                          )}
-                        </div>
-                        <p className="text-xs truncate" style={{ color: 'var(--text-2)' }}>
-                          {u.subtitle}{u.city ? ` · ${u.city}` : ''}
-                        </p>
+              {/* Lista utilizatori: rezultate căutare sau sugestii din conversații */}
+              {(() => {
+                const isSearching = groupMemberSearch.trim().length >= 2;
+                const displayList = isSearching ? groupMemberResults : groupMemberSuggestions;
+                if (!isSearching && displayList.length === 0) return null;
+                return (
+                  <div className="mt-1 rounded-xl overflow-hidden"
+                    style={{ border: '1px solid var(--border)', backgroundColor: 'var(--bg-3)' }}>
+                    {searchingMembers ? (
+                      <div className="flex items-center justify-center py-3">
+                        <Loader2 size={14} className="animate-spin" style={{ color: 'var(--text-2)' }} />
                       </div>
-                    </button>
-                  ))}
-                </div>
-              )}
+                    ) : displayList.length === 0 && isSearching ? (
+                      <p className="text-xs text-center py-3" style={{ color: 'var(--text-2)' }}>
+                        Niciun elev găsit
+                      </p>
+                    ) : (
+                      <>
+                        {!isSearching && (
+                          <p className="text-xs px-3 pt-2 pb-1 font-medium" style={{ color: 'var(--text-2)' }}>
+                            Elevi cu care ai interacționat
+                          </p>
+                        )}
+                        {displayList.map((u) => (
+                          <button
+                            key={u.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedMembers((prev) => [...prev, u]);
+                              setGroupMemberResults((prev) => prev.filter((r) => r.id !== u.id));
+                              setGroupMemberSuggestions((prev) => prev.filter((r) => r.id !== u.id));
+                              setGroupMemberSearch('');
+                            }}
+                            className="w-full flex items-center gap-3 px-3 py-2.5 text-left"
+                            style={{ borderBottom: '1px solid var(--border)' }}
+                            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-4)')}
+                            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                          >
+                            {u.avatarUrl
+                              ? <img src={u.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" loading="lazy" />
+                              : <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+                                  style={{ backgroundColor: 'var(--bg-4)', color: 'var(--text-2)' }}>
+                                  {initials(`${u.firstName} ${u.lastName}`)}
+                                </div>
+                            }
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-baseline gap-1.5">
+                                <p className="text-sm font-semibold truncate" style={{ color: 'var(--text)' }}>
+                                  {u.firstName} {u.lastName}
+                                </p>
+                                {u.username && (
+                                  <span className="text-xs shrink-0" style={{ color: 'var(--text-2)' }}>@{u.username}</span>
+                                )}
+                              </div>
+                              {(u.subtitle || u.city) && (
+                                <p className="text-xs truncate" style={{ color: 'var(--text-2)' }}>
+                                  {u.subtitle}{u.city ? ` · ${u.city}` : ''}
+                                </p>
+                              )}
+                            </div>
+                          </button>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Membri selectați */}
@@ -1679,7 +1710,7 @@ export default function ChatPage() {
               <button
                 type="button"
                 onClick={() => void handleCreateGroup()}
-                disabled={!groupName.trim() || selectedMembers.length === 0 || creatingGroup}
+                disabled={!groupName.trim() || creatingGroup}
                 className="flex-1 py-2 rounded-xl text-sm font-semibold disabled:opacity-40 flex items-center justify-center gap-2"
                 style={{ backgroundColor: 'var(--orange)', color: '#fff' }}>
                 {creatingGroup ? <Loader2 size={14} className="animate-spin" /> : <Users size={14} />}

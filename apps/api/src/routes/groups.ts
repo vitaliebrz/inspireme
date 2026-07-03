@@ -28,7 +28,7 @@ router.post(
   '/',
   [
     body('name').isString().trim().isLength({ min: 2, max: 50 }),
-    body('memberIds').isArray({ min: 1 }),
+    body('memberIds').isArray(),
     body('memberIds.*').isUUID(),
   ],
   validate,
