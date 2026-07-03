@@ -4,7 +4,7 @@ import { Role } from '@prisma/client';
 import { authenticate } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { generalLimiter, uploadLimiter } from '../middleware/rateLimiter.js';
-import { uploadAvatar } from '../middleware/upload.js';
+import { uploadAvatar, compressToWebp } from '../middleware/upload.js';
 import { cloudinary } from '../lib/cloudinary.js';
 import {
   getMyProfile, updateElevProfile, updateAntreprenorProfile,
@@ -17,6 +17,7 @@ router.use(generalLimiter);
 
 type AppError = Error & { status?: number };
 function handleError(err: unknown, res: Response) {
+  console.error('[profiles]', err);
   const e = err as AppError;
   res.status(e.status ?? 500).json({ error: e.message ?? 'Eroare server' });
 }
@@ -50,6 +51,8 @@ router.patch(
   [
     body('firstName').optional().isString().trim().isLength({ min: 1, max: 50 }),
     body('lastName').optional().isString().trim().isLength({ min: 1, max: 50 }),
+    body('username').optional({ nullable: true }).isString().trim()
+      .matches(/^[a-zA-Z0-9_]{3,30}$/).withMessage('Username: 3-30 caractere, doar litere/cifre/underscore.'),
     body('bio').optional().isString().trim().isLength({ max: 500 }),
     body('bioMentor').optional().isString().trim().isLength({ max: 1000 }),
     body('city').optional().isString().trim().isLength({ max: 100 }),
@@ -70,17 +73,17 @@ router.patch(
 
       let updated;
       if (role === Role.ELEV) {
-        const { firstName, lastName, school, class: cls, city, bio, interests } = req.body as {
-          firstName?: string; lastName?: string; school?: string; class?: string;
+        const { firstName, lastName, username, school, class: cls, city, bio, interests } = req.body as {
+          firstName?: string; lastName?: string; username?: string; school?: string; class?: string;
           city?: string; bio?: string; interests?: string[];
         };
-        updated = await updateElevProfile({ userId, firstName, lastName, school, class: cls, city, bio, interests });
+        updated = await updateElevProfile({ userId, firstName, lastName, username, school, class: cls, city, bio, interests });
       } else {
-        const { firstName, lastName, company, position, domain, website, bioMentor, experienceYears } = req.body as {
-          firstName?: string; lastName?: string; company?: string; position?: string;
+        const { firstName, lastName, username, company, position, domain, website, bioMentor, experienceYears } = req.body as {
+          firstName?: string; lastName?: string; username?: string; company?: string; position?: string;
           domain?: string; website?: string; bioMentor?: string; experienceYears?: number;
         };
-        updated = await updateAntreprenorProfile({ userId, firstName, lastName, company, position, domain, website, bioMentor, experienceYears });
+        updated = await updateAntreprenorProfile({ userId, firstName, lastName, username, company, position, domain, website, bioMentor, experienceYears });
       }
 
       res.json(updated);
@@ -100,14 +103,16 @@ router.post(
       const file = req.file;
       if (!file) { res.status(400).json({ error: 'Niciun fișier primit.' }); return; }
 
-      const uploaded = await cloudinary.uploader.upload(
-        `data:${file.mimetype};base64,${file.buffer.toString('base64')}`,
-        {
-          folder: 'avatars',
-          resource_type: 'image',
-          transformation: [{ width: 400, height: 400, crop: 'fill', gravity: 'face', quality: 'auto', fetch_format: 'auto' }],
-        },
-      );
+      const webpBuffer = await compressToWebp(file.buffer, { width: 400, height: 400, quality: 85 });
+      const uploaded = await new Promise<{ secure_url: string; public_id: string }>((resolve, reject) => {
+        cloudinary.uploader.upload_stream(
+          { folder: 'avatars', resource_type: 'image', fetch_format: 'auto', quality: 'auto' },
+          (err, result) => {
+            if (err || !result) return reject(err ?? new Error('Upload avatar eșuat'));
+            resolve(result as { secure_url: string; public_id: string });
+          },
+        ).end(webpBuffer);
+      });
 
       const userId = req.user!.sub;
       const role = req.user!.role as Role;

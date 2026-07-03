@@ -88,6 +88,7 @@ enum NotificationType {
   SUBSCRIPTION_EXPIRING
   ACCOUNT_WARNING
   SYSTEM
+  GROUP_MESSAGE
 }
 
 enum InvestmentStatus {
@@ -136,8 +137,8 @@ model User {
   ideas                    Idea[]
   connectionRequestsSent   ConnectionRequest[]   @relation("SentRequests")
   connectionRequestsReceived ConnectionRequest[] @relation("ReceivedRequests")
-  conversationsAsElev      Conversation[]        @relation("ElevConversations")
-  conversationsAsAntreprenor Conversation[]      @relation("AntreprenorConversations")
+  conversationsAsA         Conversation[]        @relation("ConversationsAsA")
+  conversationsAsB         Conversation[]        @relation("ConversationsAsB")
   messagesSent             Message[]
   feedbackGiven            Feedback[]            @relation("FeedbackGiven")
   collaborationsAsElev     Collaboration[]       @relation("ElevCollaborations")
@@ -155,6 +156,9 @@ model User {
   adminActions             ModerationAction[]    @relation("AdminActions")
   cookieConsent            CookieConsent?
   dataExportRequests       DataExportRequest[]
+  groupsCreated            IdeaGroup[]           @relation("GroupsCreated")
+  groupMemberships         IdeaGroupMember[]
+  groupMessagesSent        GroupMessage[]
 
   @@index([email])
   @@index([role])
@@ -172,6 +176,7 @@ model ProfileElev {
   userId    String   @id @map("user_id")
   firstName String   @map("first_name")
   lastName  String   @map("last_name")
+  username  String?  @unique
   school    String?
   class     String?
   city      String?
@@ -189,6 +194,7 @@ model ProfileAntreprenor {
   userId          String              @id @map("user_id")
   firstName       String              @map("first_name")
   lastName        String              @map("last_name")
+  username        String?             @unique
   company         String?
   position        String?
   domain          String?
@@ -308,21 +314,21 @@ model ConnectionRequest {
 // ─────────────────────────────────────────────
 
 model Conversation {
-  id                  String   @id @default(uuid())
-  elevId              String   @map("elev_id")
-  antreprenorId       String   @map("antreprenor_id")
-  connectionRequestId String   @unique @map("connection_request_id")
-  createdAt           DateTime @default(now()) @map("created_at")
+  id                  String    @id @default(uuid())
+  participantAId      String    @map("participant_a_id")
+  participantBId      String    @map("participant_b_id")
+  connectionRequestId String    @unique @map("connection_request_id")
+  createdAt           DateTime  @default(now()) @map("created_at")
   lastMessageAt       DateTime? @map("last_message_at")
 
-  elev              User              @relation("ElevConversations", fields: [elevId], references: [id], onDelete: Cascade)
-  antreprenor       User              @relation("AntreprenorConversations", fields: [antreprenorId], references: [id], onDelete: Cascade)
+  participantA      User              @relation("ConversationsAsA", fields: [participantAId], references: [id], onDelete: Cascade)
+  participantB      User              @relation("ConversationsAsB", fields: [participantBId], references: [id], onDelete: Cascade)
   connectionRequest ConnectionRequest @relation(fields: [connectionRequestId], references: [id])
   messages          Message[]
   reports           Report[]          @relation("ConversationReports")
 
-  @@index([elevId])
-  @@index([antreprenorId])
+  @@index([participantAId])
+  @@index([participantBId])
   @@index([lastMessageAt])
   @@map("conversations")
 }
@@ -418,8 +424,10 @@ model Giveaway {
   status                GiveawayStatus @default(ACTIVE)
   selectionLog          Json?          @map("selection_log")
   notifyAll             Boolean        @default(false) @map("notify_all")
-  investmentConfirmedAt DateTime?      @map("investment_confirmed_at")
-  badgeUnfulfilled      Boolean        @default(false) @map("badge_unfulfilled")
+  investmentConfirmedByAntreprenor Boolean   @default(false) @map("investment_confirmed_by_antreprenor")
+  investmentConfirmedByElev        Boolean   @default(false) @map("investment_confirmed_by_elev")
+  investmentConfirmedAt            DateTime? @map("investment_confirmed_at")
+  badgeUnfulfilled                 Boolean   @default(false) @map("badge_unfulfilled")
   createdAt             DateTime       @default(now()) @map("created_at")
   updatedAt             DateTime       @updatedAt @map("updated_at")
 
@@ -657,3 +665,55 @@ model DataExportRequest {
 // Full-text search vector pentru idei
 // Index creat prin migrație SQL custom:
 // CREATE INDEX ideas_fts ON ideas USING GIN(to_tsvector('romanian', title || ' ' || problem || ' ' || solution));
+
+// ─────────────────────────────────────────────
+// GRUPURI DE ELEVI
+// ─────────────────────────────────────────────
+
+model IdeaGroup {
+  id            String    @id @default(uuid())
+  name          String
+  createdById   String    @map("created_by_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  lastMessageAt DateTime? @map("last_message_at")
+
+  createdBy User             @relation("GroupsCreated", fields: [createdById], references: [id], onDelete: Cascade)
+  members   IdeaGroupMember[]
+  messages  GroupMessage[]
+
+  @@index([createdById])
+  @@map("idea_groups")
+}
+
+model IdeaGroupMember {
+  id       String   @id @default(uuid())
+  groupId  String   @map("group_id")
+  userId   String   @map("user_id")
+  role     String   @default("MEMBER")
+  joinedAt DateTime @default(now()) @map("joined_at")
+
+  group IdeaGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([groupId])
+  @@index([userId])
+  @@map("idea_group_members")
+}
+
+model GroupMessage {
+  id        String      @id @default(uuid())
+  groupId   String      @map("group_id")
+  senderId  String      @map("sender_id")
+  content   String?
+  type      MessageType @default(TEXT)
+  fileUrl   String?     @map("file_url")
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  group  IdeaGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  sender User      @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([groupId, createdAt])
+  @@index([senderId])
+  @@map("group_messages")
+}

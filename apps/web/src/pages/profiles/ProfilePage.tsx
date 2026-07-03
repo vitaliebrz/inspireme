@@ -20,7 +20,7 @@ interface ProfileCount {
 interface ElevProfile {
   id: string; plan: string; createdAt: string; role?: string; targetRole?: string;
   profileElev: {
-    firstName: string; lastName: string; school: string | null; class: string | null;
+    firstName: string; lastName: string; username: string | null; school: string | null; class: string | null;
     city: string | null; bio: string | null; interests: string[]; avatarUrl: string | null;
   } | null;
   ideas: {
@@ -41,7 +41,7 @@ interface ElevProfile {
 interface AntreprenorProfile {
   id: string; plan: string; createdAt: string; role?: string; targetRole?: string;
   profileAntreprenor: {
-    firstName: string; lastName: string; company: string | null; position: string | null;
+    firstName: string; lastName: string; username: string | null; company: string | null; position: string | null;
     domain: string | null; website: string | null; bioMentor: string | null;
     experienceYears: number | null; avatarUrl: string | null; status: string;
   } | null;
@@ -214,6 +214,12 @@ export default function ProfilePage() {
                 </span>
               )}
             </div>
+            {/* Username public — afișat dacă există */}
+            {p && (p as { username?: string | null }).username && (
+              <p className="text-xs font-medium mb-1" style={{ color: 'var(--text-2)' }}>
+                @{(p as { username?: string | null }).username}
+              </p>
+            )}
 
             {isElev ? (
               <div className="flex flex-wrap gap-3 text-xs" style={{ color: 'var(--text-2)' }}>
@@ -297,6 +303,11 @@ export default function ProfilePage() {
               <EditField label="Prenume" value={form['firstName'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, firstName: v }))} />
               <EditField label="Nume" value={form['lastName'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, lastName: v }))} />
             </div>
+            {/* Câmp username cu prefix @ — minim 3 caractere, doar litere/cifre/underscore */}
+            <UsernameField
+              value={form['username'] ?? ''}
+              onChange={(v) => setForm((f) => ({ ...f, username: v }))}
+            />
             {isElev ? (
               <>
                 <EditField label="Școală" value={form['school'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, school: v }))} />
@@ -460,6 +471,44 @@ function EditField({
         ? <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={3} className={`${className} resize-y`} style={style} />
         : <input type="text" value={value} onChange={(e) => onChange(e.target.value)} className={className} style={style} />
       }
+    </div>
+  );
+}
+
+function UsernameField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  // Validare: minim 3 caractere, doar litere/cifre/underscore
+  const isValid = value === '' || (/^[a-zA-Z0-9_]{3,30}$/.test(value));
+  const handleChange = (raw: string) => {
+    // Permitem doar caracterele valide, fără spații
+    onChange(raw.replace(/[^a-zA-Z0-9_]/g, '').slice(0, 30));
+  };
+  return (
+    <div>
+      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-2)' }}>
+        Username (opțional)
+      </label>
+      <div className="flex items-center rounded-xl overflow-hidden"
+        style={{ border: `1px solid ${!isValid ? '#ef4444' : 'var(--border)'}`, backgroundColor: 'var(--bg-3)' }}>
+        <span className="px-3 py-2 text-sm font-medium shrink-0" style={{ color: 'var(--text-2)' }}>@</span>
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => handleChange(e.target.value)}
+          placeholder="username"
+          className="flex-1 py-2 pr-3 text-sm outline-none bg-transparent"
+          style={{ color: 'var(--text)' }}
+        />
+      </div>
+      {!isValid && (
+        <p className="text-xs mt-1" style={{ color: '#ef4444' }}>
+          Minim 3 caractere, doar litere, cifre și underscore (_).
+        </p>
+      )}
+      {isValid && value && (
+        <p className="text-xs mt-1" style={{ color: 'var(--text-2)' }}>
+          Profilul tău va fi găsibil ca @{value}
+        </p>
+      )}
     </div>
   );
 }

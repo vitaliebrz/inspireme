@@ -12,13 +12,13 @@ export async function getMyProfile(userId: string, role: Role) {
       id: true, email: true, role: true, plan: true, createdAt: true,
       profileElev: role === Role.ELEV ? {
         select: {
-          firstName: true, lastName: true, school: true, class: true,
+          firstName: true, lastName: true, username: true, school: true, class: true,
           city: true, bio: true, interests: true, avatarUrl: true,
         },
       } : false,
       profileAntreprenor: role === Role.ANTREPRENOR ? {
         select: {
-          firstName: true, lastName: true, company: true, position: true,
+          firstName: true, lastName: true, username: true, company: true, position: true,
           domain: true, website: true, bioMentor: true, experienceYears: true,
           avatarUrl: true, status: true,
         },
@@ -46,6 +46,7 @@ export interface UpdateElevProfileInput {
   userId: string;
   firstName?: string;
   lastName?: string;
+  username?: string | null;
   school?: string;
   class?: string;
   city?: string;
@@ -56,6 +57,10 @@ export interface UpdateElevProfileInput {
 
 export async function updateElevProfile(input: UpdateElevProfileInput) {
   const { userId, ...data } = input;
+  // Dacă username este string gol, îl tratăm ca null (ștergere username)
+  if (data.username !== undefined) {
+    data.username = data.username === '' ? null : data.username;
+  }
   return prisma.profileElev.upsert({
     where: { userId },
     create: {
@@ -66,7 +71,7 @@ export async function updateElevProfile(input: UpdateElevProfileInput) {
     },
     update: data,
     select: {
-      firstName: true, lastName: true, school: true, class: true,
+      firstName: true, lastName: true, username: true, school: true, class: true,
       city: true, bio: true, interests: true, avatarUrl: true,
     },
   });
@@ -80,6 +85,7 @@ export interface UpdateAntreprenorProfileInput {
   userId: string;
   firstName?: string;
   lastName?: string;
+  username?: string | null;
   company?: string;
   position?: string;
   domain?: string;
@@ -91,6 +97,10 @@ export interface UpdateAntreprenorProfileInput {
 
 export async function updateAntreprenorProfile(input: UpdateAntreprenorProfileInput) {
   const { userId, ...data } = input;
+  // Dacă username este string gol, îl tratăm ca null (ștergere username)
+  if (data.username !== undefined) {
+    data.username = data.username === '' ? null : data.username;
+  }
   return prisma.profileAntreprenor.upsert({
     where: { userId },
     create: {
@@ -101,7 +111,7 @@ export async function updateAntreprenorProfile(input: UpdateAntreprenorProfileIn
     },
     update: data,
     select: {
-      firstName: true, lastName: true, company: true, position: true,
+      firstName: true, lastName: true, username: true, company: true, position: true,
       domain: true, website: true, bioMentor: true, experienceYears: true,
       avatarUrl: true, status: true,
     },
@@ -119,7 +129,7 @@ export async function getPublicElevProfile(userId: string, viewerId: string) {
       id: true, plan: true, createdAt: true,
       profileElev: {
         select: {
-          firstName: true, lastName: true, school: true, class: true,
+          firstName: true, lastName: true, username: true, school: true, class: true,
           city: true, bio: true, interests: true, avatarUrl: true,
         },
       },
@@ -178,7 +188,7 @@ export async function getPublicAntreprenorProfile(userId: string, viewerId: stri
       id: true, plan: true, createdAt: true,
       profileAntreprenor: {
         select: {
-          firstName: true, lastName: true, company: true, position: true,
+          firstName: true, lastName: true, username: true, company: true, position: true,
           domain: true, website: true, bioMentor: true, experienceYears: true,
           avatarUrl: true, status: true,
         },
