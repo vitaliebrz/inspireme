@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { prisma } from '../lib/prisma.js';
 import { redis, REDIS_KEYS, REDIS_TTL } from '../lib/redis.js';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../lib/jwt.js';
-import { sendPasswordResetEmail, sendParentalConsentEmail } from '../lib/email.js';
+import { sendPasswordResetEmail, sendPasswordChangedEmail, sendParentalConsentEmail, sendWelcomeEmail } from '../lib/email.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { Role, Plan } from '../types/index.js';
 
@@ -53,12 +53,27 @@ interface PublicUser {
   role: Role;
   plan: Plan;
   firstLogin: boolean;
+  avatarUrl: string | null;
+  firstName: string | null;
+  lastName: string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────
 
-function toPublicUser(user: { id: string; email: string; role: Role; plan: Plan; firstLogin: boolean }): PublicUser {
-  return { id: user.id, email: user.email, role: user.role, plan: user.plan, firstLogin: user.firstLogin };
+function toPublicUser(
+  user: { id: string; email: string; role: Role; plan: Plan; firstLogin: boolean },
+  profile?: { firstName: string; lastName: string; avatarUrl: string | null } | null,
+): PublicUser {
+  return {
+    id: user.id,
+    email: user.email,
+    role: user.role,
+    plan: user.plan,
+    firstLogin: user.firstLogin,
+    avatarUrl: profile?.avatarUrl ?? null,
+    firstName: profile?.firstName ?? null,
+    lastName: profile?.lastName ?? null,
+  };
 }
 
 async function generateTokenPair(user: PublicUser): Promise<TokenPair> {
@@ -134,6 +149,10 @@ export async function registerElev(input: RegisterElevInput): Promise<AuthResult
 
   const publicUser = toPublicUser(user);
   const tokens = await generateTokenPair(publicUser);
+
+  // Email bun venit — non-blocking
+  sendWelcomeEmail(emailLower, input.firstName, 'elev').catch(() => null);
+
   return { ...tokens, user: publicUser };
 }
 
@@ -169,6 +188,10 @@ export async function registerAntreprenor(input: RegisterAntreprenorInput): Prom
 
   const publicUser = toPublicUser(user);
   const tokens = await generateTokenPair(publicUser);
+
+  // Email bun venit — non-blocking
+  sendWelcomeEmail(emailLower, input.firstName, 'antreprenor').catch(() => null);
+
   return { ...tokens, user: publicUser };
 }
 
@@ -177,7 +200,13 @@ export async function registerAntreprenor(input: RegisterAntreprenorInput): Prom
 export async function login(email: string, password: string): Promise<AuthResult> {
   const emailLower = email.toLowerCase();
 
-  const user = await prisma.user.findUnique({ where: { email: emailLower } });
+  const user = await prisma.user.findUnique({
+    where: { email: emailLower },
+    include: {
+      profileElev: { select: { firstName: true, lastName: true, avatarUrl: true } },
+      profileAntreprenor: { select: { firstName: true, lastName: true, avatarUrl: true } },
+    },
+  });
 
   // Nu dezvăluim dacă userul există sau nu (securitate)
   if (!user) {
@@ -206,7 +235,8 @@ export async function login(email: string, password: string): Promise<AuthResult
     data: { lastLogin: new Date(), lastActivity: new Date() },
   });
 
-  const publicUser = toPublicUser({ ...user, firstLogin: isFirstLogin });
+  const profile = user.profileElev ?? user.profileAntreprenor ?? null;
+  const publicUser = toPublicUser({ ...user, firstLogin: isFirstLogin }, profile);
   const tokens = await generateTokenPair(publicUser);
 
   // Marchează firstLogin = false (după ce am generat token-ul cu firstLogin: true)
@@ -259,11 +289,20 @@ export async function forgotPassword(email: string): Promise<void> {
   // Nu dezvăluim dacă userul există (securitate)
   if (!user || user.isDeleted) return;
 
-  const token = crypto.randomUUID();
+  // Invalidează orice link de resetare cerut anterior și încă activ
+  const prevHash = await redis.get<string>(REDIS_KEYS.passwordResetByUser(user.id));
+  if (prevHash) await redis.del(REDIS_KEYS.passwordReset(prevHash));
+
+  // Token brut trimis doar prin email — în Redis stocăm doar hash-ul lui,
+  // ca un dump/log al bazei să nu conțină link-uri funcționale
+  const token = crypto.randomBytes(32).toString('hex');
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
   const resetLink = `${FRONTEND_URL}/reset-password?token=${token}`;
 
-  // Stochează în Redis — TTL 24 ore, single-use (șterse după folosire)
-  await redis.set(REDIS_KEYS.passwordReset(token), user.id, { ex: REDIS_TTL.passwordReset });
+  await Promise.all([
+    redis.set(REDIS_KEYS.passwordReset(tokenHash), user.id, { ex: REDIS_TTL.passwordReset }),
+    redis.set(REDIS_KEYS.passwordResetByUser(user.id), tokenHash, { ex: REDIS_TTL.passwordReset }),
+  ]);
 
   await sendPasswordResetEmail(user.email, resetLink);
 }
@@ -271,28 +310,37 @@ export async function forgotPassword(email: string): Promise<void> {
 // ─── Validate Reset Token ─────────────────────────────────────────
 
 export async function validateResetToken(token: string): Promise<boolean> {
-  const userId = await redis.get<string>(REDIS_KEYS.passwordReset(token));
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+  const userId = await redis.get<string>(REDIS_KEYS.passwordReset(tokenHash));
   return !!userId;
 }
 
 // ─── Reset Password ───────────────────────────────────────────────
 
 export async function resetPassword(token: string, newPassword: string): Promise<void> {
-  const userId = await redis.get<string>(REDIS_KEYS.passwordReset(token));
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+  const userId = await redis.get<string>(REDIS_KEYS.passwordReset(tokenHash));
   if (!userId) throw new AppError(400, 'Link-ul a expirat sau a fost deja utilizat.');
 
   const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
 
-  await prisma.user.update({
+  const updated = await prisma.user.update({
     where: { id: userId },
     data: { passwordHash },
+    select: { email: true },
   });
 
-  // Single-use: șterge token din Redis
-  await redis.del(REDIS_KEYS.passwordReset(token));
+  // Single-use: șterge token-ul (și indexul per-user) din Redis
+  await Promise.all([
+    redis.del(REDIS_KEYS.passwordReset(tokenHash)),
+    redis.del(REDIS_KEYS.passwordResetByUser(userId)),
+  ]);
 
-  // Revocă toate refresh token-urile active
+  // Revocă toate refresh token-urile active — sesiunile deschise sunt delogate
   await redis.del(REDIS_KEYS.refreshToken(userId));
+
+  // Notificare de securitate — non-blocking; dacă userul nu a inițiat schimbarea, află imediat
+  sendPasswordChangedEmail(updated.email).catch(() => {});
 }
 
 // ─── Parental Consent ─────────────────────────────────────────────

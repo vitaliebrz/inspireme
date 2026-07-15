@@ -1,114 +1,105 @@
-import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
-import { createPortal } from 'react-dom';
-import { X, CheckCircle, AlertCircle, Info } from 'lucide-react';
+import { createContext, useContext, type ReactNode } from 'react';
 
 type ToastType = 'success' | 'error' | 'info';
-
-interface Toast {
-  id: string;
-  message: string;
-  type: ToastType;
-}
-
-interface ToastContextType {
-  toast: (message: string, type?: ToastType) => void;
-}
-
+interface ToastContextType { toast: (message: string, type?: ToastType) => void; }
 const ToastContext = createContext<ToastContextType | null>(null);
 
-const CONFIG: Record<ToastType, { bg: string; border: string; iconColor: string; icon: React.ReactNode }> = {
-  success: { bg: '#1a2e1a', border: '#22c55e', iconColor: '#22c55e', icon: <CheckCircle size={16} /> },
-  error:   { bg: '#2e1a1a', border: '#ef4444', iconColor: '#ef4444', icon: <AlertCircle size={16} /> },
-  info:    { bg: '#2a2310', border: '#f6a623', iconColor: '#f6a623', icon: <Info size={16} /> },
+const COLORS = {
+  success: { bg: '#1a2e1a', border: '#22c55e', icon: '#22c55e' },
+  error:   { bg: '#2e1a1a', border: '#ef4444', icon: '#ef4444' },
+  info:    { bg: '#1a1e2e', border: '#f6a623', icon: '#f6a623' },
 };
 
-export function ToastProvider({ children }: { children: React.ReactNode }) {
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const timers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [ready, setReady] = useState(false);
+const ICONS = {
+  success: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`,
+  error:   `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`,
+  info:    `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
+};
 
-  // Creăm containerul via JavaScript — singura metodă garantată pe toate browserele mobile.
-  // Abordările cu portal la document.body sau inline HTML style eșuează pe iOS/Android
-  // din cauza overflow:hidden pe body (chat page) sau a CSS max()/env() nesuportate.
-  useEffect(() => {
-    const el = document.createElement('div');
-    el.setAttribute('id', 'inspireme-toasts');
-    el.style.cssText = [
-      'position:fixed',
-      'top:16px',
-      'right:16px',
-      'z-index:2147483647',
-      'display:flex',
-      'flex-direction:column',
-      'gap:8px',
-      'width:340px',
-      'max-width:calc(100vw - 32px)',
-      'pointer-events:none',
-      '-webkit-transform:translateZ(0)',
-      'transform:translateZ(0)',
-    ].join(';');
-    document.documentElement.appendChild(el); // <html>, nu <body> — evităm overflow:hidden pe body
-    containerRef.current = el;
-    setReady(true);
-    return () => {
-      if (document.documentElement.contains(el)) {
-        document.documentElement.removeChild(el);
-      }
-    };
-  }, []);
+let _container: HTMLDivElement | null = null;
 
-  const remove = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-    const t = timers.current.get(id);
-    if (t) { clearTimeout(t); timers.current.delete(id); }
-  }, []);
+function getContainer(): HTMLDivElement {
+  if (!_container || !document.body.contains(_container)) {
+    _container = document.createElement('div');
+    Object.assign(_container.style, {
+      position: 'fixed',
+      top: '72px',
+      right: '16px',
+      zIndex: '999999',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '8px',
+      width: '320px',
+      maxWidth: 'calc(100vw - 32px)',
+      pointerEvents: 'none',
+    });
+    document.body.appendChild(_container);
+  }
+  return _container;
+}
 
-  const toast = useCallback((message: string, type: ToastType = 'info') => {
-    const id = crypto.randomUUID();
-    setToasts((prev) => [...prev, { id, message, type }]);
-    timers.current.set(id, setTimeout(() => remove(id), 4500));
-  }, [remove]);
+function showToast(message: string, type: ToastType = 'info') {
+  const c = COLORS[type];
 
-  const portal = ready && containerRef.current
-    ? createPortal(
-        <>
-          {toasts.map((t) => {
-            const c = CONFIG[t.type];
-            return (
-              <div key={t.id} role="alert" style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                gap: 10,
-                padding: '12px 14px',
-                borderRadius: 14,
-                backgroundColor: c.bg,
-                border: `1.5px solid ${c.border}`,
-                boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-                pointerEvents: 'all',
-              }}>
-                <span style={{ color: c.iconColor, flexShrink: 0, marginTop: 1 }}>{c.icon}</span>
-                <p style={{ margin: 0, flex: 1, fontSize: 14, fontWeight: 500, lineHeight: 1.4, color: '#f0f2f8' }}>
-                  {t.message}
-                </p>
-                <button onClick={() => remove(t.id)} style={{
-                  background: 'none', border: 'none', padding: 2, cursor: 'pointer',
-                  color: '#8892a4', flexShrink: 0, display: 'flex', marginTop: 1,
-                }} aria-label="Închide">
-                  <X size={14} />
-                </button>
-              </div>
-            );
-          })}
-        </>,
-        containerRef.current,
-      )
-    : null;
+  const el = document.createElement('div');
+  el.setAttribute('role', 'alert');
+  Object.assign(el.style, {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '10px',
+    padding: '12px 14px',
+    borderRadius: '14px',
+    backgroundColor: c.bg,
+    border: `1.5px solid ${c.border}`,
+    boxShadow: '0 8px 32px rgba(0,0,0,0.7)',
+    pointerEvents: 'all',
+  });
 
+  const icon = document.createElement('span');
+  icon.innerHTML = ICONS[type];
+  icon.style.color = c.icon;
+  icon.style.flexShrink = '0';
+  icon.style.marginTop = '1px';
+  el.appendChild(icon);
+
+  const text = document.createElement('p');
+  text.textContent = message;
+  Object.assign(text.style, {
+    margin: '0',
+    flex: '1',
+    fontSize: '14px',
+    fontWeight: '500',
+    lineHeight: '1.4',
+    color: '#f0f2f8',
+    wordBreak: 'break-word',
+    fontFamily: 'inherit',
+  });
+  el.appendChild(text);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.setAttribute('aria-label', 'Închide');
+  closeBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+  Object.assign(closeBtn.style, {
+    background: 'none',
+    border: 'none',
+    padding: '2px',
+    cursor: 'pointer',
+    color: '#8892a4',
+    flexShrink: '0',
+    display: 'flex',
+    marginTop: '1px',
+  });
+  closeBtn.addEventListener('click', () => el.remove());
+  el.appendChild(closeBtn);
+
+  getContainer().appendChild(el);
+  setTimeout(() => el.remove(), 4500);
+}
+
+export function ToastProvider({ children }: { children: ReactNode }) {
   return (
-    <ToastContext.Provider value={{ toast }}>
+    <ToastContext.Provider value={{ toast: showToast }}>
       {children}
-      {portal}
     </ToastContext.Provider>
   );
 }

@@ -2,13 +2,19 @@ import { Router, Request, Response } from 'express';
 import { body, param } from 'express-validator';
 import { authenticate } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
-import { generalLimiter } from '../middleware/rateLimiter.js';
+import { generalLimiter, uploadLimiter } from '../middleware/rateLimiter.js';
+import { uploadAvatar } from '../middleware/upload.js';
+import { cloudinary, deleteAsset, extractPublicId } from '../lib/cloudinary.js';
+import { prisma } from '../lib/prisma.js';
+import { Plan } from '@prisma/client';
 import {
   createGroup,
   getGroups,
   getGroupDetails,
   getGroupMessages,
   sendGroupMessage,
+  updateGroupName,
+  updateGroupAvatar,
   addGroupMember,
   removeGroupMember,
 } from '../services/group.service.js';
@@ -31,8 +37,13 @@ router.post(
     body('memberIds').isArray(),
     body('memberIds.*').isUUID(),
   ],
+
   validate,
   async (req: Request, res: Response) => {
+    if (req.user!.role !== 'ELEV') {
+      res.status(403).json({ error: 'Doar elevii pot crea grupuri.' });
+      return;
+    }
     try {
       const { name, memberIds } = req.body as { name: string; memberIds: string[] };
       const group = await createGroup(req.user!.sub, name, memberIds);
@@ -52,6 +63,56 @@ router.get('/', async (req: Request, res: Response) => {
     handleError(err, res);
   }
 });
+
+// PATCH /groups/:id — redenumire grup (orice membru)
+router.patch(
+  '/:id',
+  [param('id').isUUID(), body('name').isString().trim().isLength({ min: 2, max: 50 })],
+  validate,
+  async (req: Request, res: Response) => {
+    try {
+      const result = await updateGroupName(req.params['id'] as string, req.user!.sub, req.body['name'] as string);
+      res.json(result);
+    } catch (err) {
+      handleError(err, res);
+    }
+  },
+);
+
+// POST /groups/:id/avatar — schimbă poza grupului și șterge imaginea precedentă
+router.post(
+  '/:id/avatar',
+  uploadLimiter,
+  uploadAvatar.single('avatar'),
+  async (req: Request, res: Response) => {
+    try {
+      const file = req.file;
+      if (!file) { res.status(400).json({ error: 'Niciun fișier primit.' }); return; }
+
+      // Citim avatarUrl-ul curent înainte de upload
+      const existing = await prisma.ideaGroup.findUnique({
+        where: { id: req.params['id'] as string },
+        select: { avatarUrl: true },
+      });
+
+      const uploaded = await cloudinary.uploader.upload(
+        `data:${file.mimetype};base64,${file.buffer.toString('base64')}`,
+        { folder: 'group_avatars', transformation: [{ width: 200, height: 200, crop: 'fill', quality: 'auto' }] },
+      );
+      const result = await updateGroupAvatar(req.params['id'] as string, req.user!.sub, uploaded.secure_url);
+
+      // Ștergem imaginea veche din Cloudinary după ce DB-ul e actualizat
+      if (existing?.avatarUrl) {
+        const oldPublicId = extractPublicId(existing.avatarUrl);
+        if (oldPublicId) deleteAsset(oldPublicId).catch(() => {});
+      }
+
+      res.json(result);
+    } catch (err) {
+      handleError(err, res);
+    }
+  },
+);
 
 // GET /groups/:id — detalii grup (membri, info)
 router.get(
@@ -90,6 +151,7 @@ router.post(
   [
     param('id').isUUID(),
     body('content').isString().trim().isLength({ min: 1, max: 4000 }),
+    body('replyToId').optional().isUUID(),
   ],
   validate,
   async (req: Request, res: Response) => {
@@ -97,7 +159,9 @@ router.post(
       const message = await sendGroupMessage(
         req.params['id'] as string,
         req.user!.sub,
+        req.user!.plan as Plan,
         req.body['content'] as string,
+        req.body['replyToId'] as string | undefined,
       );
       res.status(201).json(message);
     } catch (err) {

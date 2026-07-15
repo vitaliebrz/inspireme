@@ -26,7 +26,18 @@ export function errorHandler(
   }
 
   // Multer errors
-  if (err.name === 'MulterError' || err.message.includes('permise')) {
+  if (err.name === 'MulterError') {
+    const code = (err as Error & { code?: string }).code;
+    const msg =
+      code === 'LIMIT_FILE_SIZE'  ? 'Fișierul este prea mare. Maxim permis: 10MB.' :
+      code === 'LIMIT_FILE_COUNT' ? 'Prea multe fișiere trimise.' :
+      code === 'LIMIT_UNEXPECTED_FILE' ? 'Câmp de fișier neașteptat.' :
+      err.message;
+    res.status(400).json({ error: msg });
+    return;
+  }
+  // Erori din fileFilter (format nesuportat, etc.)
+  if (err.message.includes('permise') || err.message.includes('nesuportat') || err.message.includes('Format')) {
     res.status(400).json({ error: err.message });
     return;
   }

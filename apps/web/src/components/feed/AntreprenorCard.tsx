@@ -1,4 +1,6 @@
-import { Handshake, Gift, Crown, AlertCircle } from 'lucide-react';
+import { Handshake, Gift, Crown, AlertCircle, User, MessageCirclePlus, MessageSquare } from 'lucide-react';
+
+const canHover = typeof window !== 'undefined' && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
 
 const STATUS_CONFIG = {
   ACTIV:   { label: 'Activ',   color: '#22c55e' },
@@ -30,9 +32,12 @@ export interface AntreprenorCardData {
 interface Props {
   antreprenor: AntreprenorCardData;
   onClick?: () => void;
+  onViewProfile?: () => void;
+  onContact?: () => void;
+  isConnected?: boolean;
 }
 
-export default function AntreprenorCard({ antreprenor, onClick }: Props) {
+export default function AntreprenorCard({ antreprenor, onClick, onViewProfile, onContact, isConnected }: Props) {
   const p = antreprenor.profileAntreprenor;
   if (!p) return null;
 
@@ -44,13 +49,16 @@ export default function AntreprenorCard({ antreprenor, onClick }: Props) {
   return (
     <article
       onClick={onClick}
-      className="flex flex-col rounded-2xl p-4 cursor-pointer group transition-transform hover:-translate-y-0.5"
+      className="flex flex-col rounded-2xl p-4 cursor-pointer"
       style={{
+        transition: 'transform 150ms var(--ease-out)',
         backgroundColor: 'var(--bg-2)',
         border: '1px solid var(--border)',
         boxShadow: isPro ? '0 0 0 1.5px rgba(246,166,35,0.3)' : undefined,
         opacity: isRetras ? 0.65 : 1,
       }}
+      onMouseEnter={canHover ? (e) => { (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'; } : undefined}
+      onMouseLeave={canHover ? (e) => { (e.currentTarget as HTMLElement).style.transform = ''; } : undefined}
     >
       {/* Header */}
       <div className="flex items-start gap-3 mb-3">
@@ -132,6 +140,42 @@ export default function AntreprenorCard({ antreprenor, onClick }: Props) {
         </span>
         {p.experienceYears && (
           <span className="ml-auto">{p.experienceYears} ani exp.</span>
+        )}
+      </div>
+
+      {/* Butoane acțiuni */}
+      <div className="grid grid-cols-2 gap-2 mt-3">
+        <button
+          onClick={(e) => { e.stopPropagation(); onViewProfile?.(); }}
+          className="flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium cursor-pointer"
+          style={{ backgroundColor: 'var(--bg-3)', color: 'var(--text-2)', border: '1px solid var(--border)' }}
+          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-4)')}
+          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-3)')}
+        >
+          <User size={12} /> Vizualizează profil
+        </button>
+        {onContact && (
+          isConnected ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); onContact(); }}
+              className="flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold cursor-pointer"
+              style={{ backgroundColor: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.25)' }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(34,197,94,0.2)')}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'rgba(34,197,94,0.12)')}
+            >
+              <MessageSquare size={12} /> Deschide chat
+            </button>
+          ) : (
+            <button
+              onClick={(e) => { e.stopPropagation(); onContact(); }}
+              className="flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold cursor-pointer"
+              style={{ backgroundColor: 'rgba(246,166,35,0.12)', color: 'var(--orange)', border: '1px solid rgba(246,166,35,0.25)' }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(246,166,35,0.2)')}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'rgba(246,166,35,0.12)')}
+            >
+              <MessageCirclePlus size={12} /> Trimite cerere
+            </button>
+          )
         )}
       </div>
     </article>

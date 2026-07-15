@@ -138,7 +138,7 @@ export async function getPublicElevProfile(userId: string, viewerId: string) {
         orderBy: { createdAt: 'desc' },
         take: 10,
         select: {
-          id: true, title: true, category: true, status: true, planAtPost: true,
+          id: true, title: true, categories: true, status: true, planAtPost: true,
           viewCount: true, createdAt: true,
           images: { select: { url: true }, take: 1 },
           _count: { select: { feedbackList: true } },
@@ -155,13 +155,47 @@ export async function getPublicElevProfile(userId: string, viewerId: string) {
           },
         },
       },
+      giveawayParticipations: {
+        orderBy: { joinedAt: 'desc' },
+        take: 30,
+        select: {
+          joinedAt: true,
+          giveaway: { select: { id: true, title: true, status: true, winnerId: true } },
+        },
+      },
       _count: { select: { ideas: true, collaborationsAsElev: true } },
     },
   });
   if (!user) throw Object.assign(new Error('Profil negăsit.'), { status: 404 });
 
-  // Nu verificăm blocarea pentru profilul propriu
-  if (userId === viewerId) return user;
+  // Profilul propriu: returnăm și datele private (participări giveaway, feedback primit)
+  if (userId === viewerId) {
+    const feedbackReceived = await prisma.feedback.findMany({
+      where: { idea: { userId } },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+      select: {
+        id: true, ratingGeneral: true, comment: true, createdAt: true,
+        antreprenor: {
+          select: {
+            profileAntreprenor: { select: { firstName: true, lastName: true, avatarUrl: true } },
+          },
+        },
+        idea: { select: { title: true } },
+      },
+    });
+    return {
+      ...user,
+      giveawayParticipations: user.giveawayParticipations.map((p) => ({
+        id: p.giveaway.id,
+        title: p.giveaway.title,
+        status: p.giveaway.status as string,
+        isWinner: p.giveaway.winnerId === userId,
+        joinedAt: p.joinedAt.toISOString(),
+      })),
+      feedbackReceived,
+    };
+  }
 
   // Verificăm dacă viewerul a blocat sau a fost blocat
   const blocked = await prisma.blockedUser.findFirst({
@@ -198,7 +232,7 @@ export async function getPublicAntreprenorProfile(userId: string, viewerId: stri
         take: 6,
         select: {
           confirmedAt: true,
-          idea: { select: { id: true, title: true, category: true } },
+          idea: { select: { id: true, title: true, categories: true } },
           elev: {
             select: {
               profileElev: { select: { firstName: true, lastName: true, avatarUrl: true } },

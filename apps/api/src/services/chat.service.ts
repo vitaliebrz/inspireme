@@ -1,6 +1,8 @@
-import { Plan, ConnectionRequestStatus, MessageType } from '@prisma/client';
+import { Plan, ConnectionRequestStatus, MessageType, NotificationType } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { redis } from '../lib/redis.js';
+import { createNotification, sendConnectionRequestEmail } from './notifications.service.js';
+import { emitToUser, emitToConversation } from '../lib/socket.js';
 
 const MAX_MSG_GRATUIT_PER_DAY = 5;
 
@@ -16,7 +18,7 @@ export async function createConnectionRequest(
   fromUserId: string,
   fromUserPlan: Plan,
   toUserId: string,
-  ideaId: string,
+  ideaId?: string,
 ) {
   // Verificăm că toUserId nu a blocat pe fromUser
   const blocked = await prisma.blockedUser.findFirst({
@@ -24,27 +26,39 @@ export async function createConnectionRequest(
   });
   if (blocked) throw Object.assign(new Error('Nu poți contacta acest utilizator.'), { status: 403 });
 
-  // Verificăm că ideaId există și aparține toUserId
-  const idea = await prisma.idea.findUnique({
-    where: { id: ideaId },
-    select: { userId: true },
-  });
-  if (!idea || idea.userId !== toUserId) {
-    throw Object.assign(new Error('Ideea nu există sau nu aparține acestui utilizator.'), { status: 404 });
+  // Dacă ideaId e furnizat, verificăm că aparține toUserId și nu e realizată
+  let ideaTitle: string | null = null;
+  if (ideaId) {
+    const idea = await prisma.idea.findUnique({
+      where: { id: ideaId },
+      select: { userId: true, status: true, title: true },
+    });
+    if (!idea || idea.userId !== toUserId) {
+      throw Object.assign(new Error('Ideea nu există sau nu aparține acestui utilizator.'), { status: 404 });
+    }
+    if (idea.status === 'REALIZAT') {
+      throw Object.assign(new Error('Această idee este marcată ca realizată și nu mai acceptă cereri de conectare.'), { status: 409 });
+    }
+    ideaTitle = idea.title;
   }
 
-  // Verificăm că nu există deja o cerere pending/acceptată
+  // Verificăm că nu există deja o cerere pending/acceptată (cu sau fără ideaId)
   const existing = await prisma.connectionRequest.findFirst({
     where: {
       fromUserId,
       toUserId,
-      ideaId,
+      ideaId: ideaId ?? null,
       status: { in: [ConnectionRequestStatus.PENDING, ConnectionRequestStatus.ACCEPTED] },
     },
   });
-  if (existing) throw Object.assign(new Error('Ai trimis deja o cerere pentru această idee.'), { status: 409 });
+  if (existing) {
+    const msg = ideaId
+      ? 'Ai trimis deja o cerere pentru această idee.'
+      : 'Ai trimis deja o cerere de conectare acestui utilizator.';
+    throw Object.assign(new Error(msg), { status: 409 });
+  }
 
-  // Limite plan antreprenor
+  // Limite plan (valabil pentru orice tip de cerere)
   if (fromUserPlan === Plan.GRATUIT) {
     const totalSent = await prisma.connectionRequest.count({ where: { fromUserId } });
     if (totalSent >= 5) {
@@ -64,9 +78,35 @@ export async function createConnectionRequest(
   const expiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000); // 1 an
 
   const request = await prisma.connectionRequest.create({
-    data: { fromUserId, toUserId, ideaId, status: ConnectionRequestStatus.PENDING, expiresAt },
+    data: { fromUserId, toUserId, ideaId: ideaId ?? null, status: ConnectionRequestStatus.PENDING, expiresAt },
     select: { id: true, status: true, createdAt: true },
   });
+
+  // Fetch profil expeditor pentru notificare cu context (nume + avatar)
+  const senderUser = await prisma.user.findUnique({
+    where: { id: fromUserId },
+    select: {
+      profileElev: { select: { firstName: true, lastName: true, avatarUrl: true } },
+      profileAntreprenor: { select: { firstName: true, lastName: true, avatarUrl: true } },
+    },
+  });
+  const sp = senderUser?.profileElev ?? senderUser?.profileAntreprenor;
+  const fromName = sp ? `${sp.firstName} ${sp.lastName}`.trim() : 'Utilizator';
+  const fromAvatarUrl = sp?.avatarUrl ?? '';
+
+  // Notificare pentru destinatar — non-blocking
+  createNotification({
+    userId: toUserId,
+    type: NotificationType.CONNECTION_REQUEST,
+    title: `${fromName} vrea să se conecteze cu tine`,
+    body: ideaId ? 'A trimis o cerere pentru ideea ta.' : 'Vrea să intre în contact cu tine.',
+    data: { requestId: request.id, fromUserId, fromName, fromAvatarUrl, ...(ideaId ? { ideaId } : {}) },
+  }).catch(() => {});
+
+  // Email pentru destinatar — non-blocking
+  prisma.user.findUnique({ where: { id: toUserId }, select: { email: true } })
+    .then((toUser) => toUser && sendConnectionRequestEmail(toUser.email, fromName, ideaTitle))
+    .catch(() => {});
 
   return request;
 }
@@ -92,20 +132,40 @@ export async function respondToConnectionRequest(
     data: { status: action === 'ACCEPTED' ? ConnectionRequestStatus.ACCEPTED : ConnectionRequestStatus.REFUSED },
   });
 
-  // Dacă acceptată, creăm conversația
+  // Dacă acceptată, creăm conversația și înregistrarea de colaborare
   if (action === 'ACCEPTED') {
-    const existing = await prisma.conversation.findFirst({
-      where: { elevId: request.toUserId, antreprenorId: request.fromUserId },
+    let conversation = await prisma.conversation.findFirst({
+      where: {
+        OR: [
+          { participantAId: request.toUserId, participantBId: request.fromUserId },
+          { participantAId: request.fromUserId, participantBId: request.toUserId },
+        ],
+      },
+      select: { id: true },
     });
 
-    if (!existing) {
-      await prisma.conversation.create({
+    if (!conversation) {
+      conversation = await prisma.conversation.create({
         data: {
-          elevId: request.toUserId,
-          antreprenorId: request.fromUserId,
+          participantAId: request.toUserId,
+          participantBId: request.fromUserId,
           connectionRequestId: requestId,
+          originIdeaId: request.ideaId ?? null,
         },
+        select: { id: true },
       });
+    }
+
+    // Creăm colaborarea INDIFERENT dacă conversația exista — fiecare cerere acceptată = idee nouă potențial
+    if (request.ideaId) {
+      const existingCollab = await prisma.collaboration.findFirst({
+        where: { elevId: request.toUserId, antreprenorId: request.fromUserId, ideaId: request.ideaId },
+      });
+      if (!existingCollab) {
+        await prisma.collaboration.create({
+          data: { elevId: request.toUserId, antreprenorId: request.fromUserId, ideaId: request.ideaId },
+        });
+      }
     }
 
     // Actualizăm statusul ideii la CONTACTAT (prima cerere acceptată)
@@ -115,6 +175,42 @@ export async function respondToConnectionRequest(
         data: { status: 'CONTACTAT' },
       });
     }
+
+    // Creăm mesaj EVENT cu titlul ideii — marchează schimbarea de idee în conversație
+    if (request.ideaId) {
+      const idea = await prisma.idea.findUnique({
+        where: { id: request.ideaId },
+        select: { title: true },
+      });
+      if (idea) {
+        await prisma.message.create({
+          data: {
+            conversationId: conversation.id,
+            senderId: request.fromUserId,
+            content: idea.title,
+            type: MessageType.EVENT,
+            ideaId: request.ideaId,
+          },
+        });
+        await prisma.conversation.update({
+          where: { id: conversation.id },
+          data: { lastMessageAt: new Date() },
+        });
+      }
+    }
+
+    // Notificare pentru antreprenor — include conversationId pentru link direct la chat
+    createNotification({
+      userId: request.fromUserId,
+      type: NotificationType.CONNECTION_ACCEPTED,
+      title: 'Cerere acceptată ✅',
+      body: 'Elevul ți-a acceptat cererea de conectare. Poți trimite acum mesaje.',
+      data: {
+        requestId,
+        ideaId: request.ideaId ?? '',
+        conversationId: conversation.id,
+      },
+    }).catch(() => {});
   }
 
   return { success: true, action };
@@ -130,6 +226,8 @@ export async function getPendingRequests(userId: string) {
       fromUser: {
         select: {
           id: true,
+          role: true,
+          profileElev: { select: { firstName: true, lastName: true, avatarUrl: true } },
           profileAntreprenor: { select: { firstName: true, lastName: true, company: true, avatarUrl: true } },
         },
       },
@@ -141,23 +239,44 @@ export async function getPendingRequests(userId: string) {
 // CONVERSAȚII
 // ─────────────────────────────────────────────
 
+export async function getConversationWith(userId: string, targetId: string) {
+  const conv = await prisma.conversation.findFirst({
+    where: {
+      OR: [
+        { participantAId: userId, participantBId: targetId },
+        { participantAId: targetId, participantBId: userId },
+      ],
+    },
+    select: { id: true },
+  });
+  return conv ? { conversationId: conv.id } : null;
+}
+
 export async function getConversations(userId: string) {
   const conversations = await prisma.conversation.findMany({
     where: {
-      OR: [{ elevId: userId }, { antreprenorId: userId }],
+      OR: [{ participantAId: userId }, { participantBId: userId }],
     },
     orderBy: { lastMessageAt: 'desc' },
     select: {
       id: true, lastMessageAt: true, createdAt: true,
-      elev: {
+      originIdeaId: true,
+      originIdea: { select: { id: true, title: true } },
+      // Fallback pentru conversații create înainte de adăugarea originIdeaId
+      connectionRequest: { select: { idea: { select: { id: true, title: true } } } },
+      participantA: {
         select: {
           id: true,
+          role: true,
           profileElev: { select: { firstName: true, lastName: true, avatarUrl: true } },
+          profileAntreprenor: { select: { firstName: true, lastName: true, company: true, avatarUrl: true } },
         },
       },
-      antreprenor: {
+      participantB: {
         select: {
           id: true,
+          role: true,
+          profileElev: { select: { firstName: true, lastName: true, avatarUrl: true } },
           profileAntreprenor: { select: { firstName: true, lastName: true, company: true, avatarUrl: true } },
         },
       },
@@ -169,7 +288,11 @@ export async function getConversations(userId: string) {
     },
   });
 
-  return conversations;
+  // Normalizăm originIdea: folosim câmpul direct sau fallback la ideea din cererea de conectare
+  return conversations.map((conv) => ({
+    ...conv,
+    originIdea: conv.originIdea ?? conv.connectionRequest?.idea ?? null,
+  }));
 }
 
 // ─────────────────────────────────────────────
@@ -184,10 +307,10 @@ export async function getMessages(
   // Verificăm că userul face parte din conversație
   const conv = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { elevId: true, antreprenorId: true },
+    select: { participantAId: true, participantBId: true },
   });
   if (!conv) throw Object.assign(new Error('Conversație negăsită.'), { status: 404 });
-  if (conv.elevId !== userId && conv.antreprenorId !== userId) {
+  if (conv.participantAId !== userId && conv.participantBId !== userId) {
     throw Object.assign(new Error('Nu faci parte din această conversație.'), { status: 403 });
   }
 
@@ -201,7 +324,20 @@ export async function getMessages(
     take: PAGE + 1,
     select: {
       id: true, content: true, type: true, fileUrl: true,
-      createdAt: true, senderId: true,
+      createdAt: true, senderId: true, readAt: true,
+      ideaId: true,
+      idea: { select: { id: true, title: true } },
+      replyTo: {
+        select: {
+          id: true, content: true, type: true,
+          sender: {
+            select: {
+              profileElev: { select: { firstName: true, lastName: true } },
+              profileAntreprenor: { select: { firstName: true, lastName: true } },
+            },
+          },
+        },
+      },
     },
   });
 
@@ -219,20 +355,22 @@ export async function sendMessage(
   content: string,
   type: MessageType = MessageType.TEXT,
   fileUrl?: string,
+  replyToId?: string,
+  ideaId?: string,
 ) {
   // Verificăm apartenența la conversație
   const conv = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { elevId: true, antreprenorId: true },
+    select: { participantAId: true, participantBId: true },
   });
   if (!conv) throw Object.assign(new Error('Conversație negăsită.'), { status: 404 });
-  if (conv.elevId !== senderId && conv.antreprenorId !== senderId) {
+  if (conv.participantAId !== senderId && conv.participantBId !== senderId) {
     throw Object.assign(new Error('Nu faci parte din această conversație.'), { status: 403 });
   }
 
-  // Limită mesaje zilnice pentru elevii Gratuit
-  const isElev = conv.elevId === senderId;
-  if (isElev && senderPlan === Plan.GRATUIT) {
+  // Limită mesaje zilnice pentru utilizatorii Gratuit
+  const isParticipant = conv.participantAId === senderId || conv.participantBId === senderId;
+  if (isParticipant && senderPlan === Plan.GRATUIT) {
     const msgKey = `msg:${senderId}:${todayKey()}`;
     const todayCount = Number(await redis.get<number>(msgKey) ?? 0);
     if (todayCount >= MAX_MSG_GRATUIT_PER_DAY) {
@@ -252,8 +390,25 @@ export async function sendMessage(
       content,
       type,
       fileUrl: fileUrl ?? null,
+      replyToId: replyToId ?? null,
+      ideaId: ideaId ?? null,
     },
-    select: { id: true, content: true, type: true, fileUrl: true, createdAt: true, senderId: true },
+    select: {
+      id: true, content: true, type: true, fileUrl: true, createdAt: true, senderId: true, readAt: true,
+      ideaId: true,
+      idea: { select: { id: true, title: true } },
+      replyTo: {
+        select: {
+          id: true, content: true, type: true,
+          sender: {
+            select: {
+              profileElev: { select: { firstName: true, lastName: true } },
+              profileAntreprenor: { select: { firstName: true, lastName: true } },
+            },
+          },
+        },
+      },
+    },
   });
 
   // Actualizăm lastMessageAt pe conversație
@@ -262,7 +417,123 @@ export async function sendMessage(
     data: { lastMessageAt: new Date() },
   });
 
+  // Emitem mesajul complet în camera conversației (server-authoritative).
+  // Doar participanții pot fi în această cameră (vezi join:conversation), deci
+  // livrarea în timp real nu depinde de retransmiterea payload-ului de la client.
+  emitToConversation(conversationId, 'message:new', { conversationId, message });
+
+  // Notificare pentru celălalt participant — upsert (o singură notificare necitită per conversație)
+  // data.count ține numărul real de mesaje necitite din această conversație
+  const receiverId = conv.participantAId === senderId ? conv.participantBId : conv.participantAId;
+  const existingNotif = await prisma.notification.findFirst({
+    where: {
+      userId: receiverId,
+      type: NotificationType.MESSAGE_NEW,
+      readAt: null,
+      data: { path: ['conversationId'], equals: conversationId },
+    },
+    select: { id: true, data: true },
+  });
+
+  // Emitem message:new pe camera personală a receiverului — pentru sunet, badge și preview sidebar
+  // Include suficiente date pentru a actualiza preview-ul conversației fără re-fetch
+  emitToUser(receiverId, 'message:new', {
+    conversationId,
+    message: {
+      senderId,
+      content: message.content,
+      type: message.type as string,
+      createdAt: message.createdAt.toISOString(),
+    },
+  });
+
+  if (existingNotif) {
+    const prevData = (existingNotif.data ?? {}) as Record<string, string>;
+    const newCount = (parseInt(prevData['count'] ?? '1', 10) + 1).toString();
+    const updatedData = { ...prevData, count: newCount };
+
+    prisma.notification.update({
+      where: { id: existingNotif.id },
+      data: { createdAt: new Date(), data: updatedData },
+    })
+      .then((updated) => emitToUser(receiverId, 'notification:new', updated))
+      .catch(() => {});
+  } else {
+    createNotification({
+      userId: receiverId,
+      type: NotificationType.MESSAGE_NEW,
+      title: 'Mesaj nou',
+      body: 'Ai primit un mesaj nou.',
+      data: { conversationId, senderId, count: '1' },
+    }).catch(() => {});
+  }
+
   return message;
+}
+
+// ─────────────────────────────────────────────
+// READ RECEIPTS
+// ─────────────────────────────────────────────
+
+export async function markMessagesAsRead(conversationId: string, userId: string): Promise<string | null> {
+  const conv = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { participantAId: true, participantBId: true },
+  });
+  if (!conv) return null;
+  if (conv.participantAId !== userId && conv.participantBId !== userId) return null;
+
+  const readAt = new Date();
+  const { count } = await prisma.message.updateMany({
+    where: { conversationId, senderId: { not: userId }, readAt: null },
+    data: { readAt },
+  });
+
+  // Emitem doar dacă au existat mesaje necitite — nu spamăm
+  if (count > 0) {
+    const readAtStr = readAt.toISOString();
+    emitToConversation(conversationId, 'messages:read', { conversationId, readAt: readAtStr });
+    return readAtStr;
+  }
+  return null;
+}
+
+// ─────────────────────────────────────────────
+// DESCHIDE CONVERSAȚIE PENTRU O IDEE NOUĂ
+// ─────────────────────────────────────────────
+
+export async function openIdeaInConversation(
+  conversationId: string,
+  userId: string,
+  ideaId: string,
+) {
+  const conv = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { participantAId: true, participantBId: true },
+  });
+  if (!conv) throw Object.assign(new Error('Conversație negăsită.'), { status: 404 });
+  if (conv.participantAId !== userId && conv.participantBId !== userId) {
+    throw Object.assign(new Error('Nu faci parte din această conversație.'), { status: 403 });
+  }
+
+  const idea = await prisma.idea.findUnique({ where: { id: ideaId }, select: { title: true } });
+  if (!idea) throw Object.assign(new Error('Idee negăsită.'), { status: 404 });
+
+  // Idempotent — nu creăm duplicate
+  const existing = await prisma.message.findFirst({
+    where: { conversationId, type: MessageType.EVENT, ideaId },
+  });
+  if (existing) return { created: false };
+
+  await prisma.message.create({
+    data: { conversationId, senderId: userId, content: idea.title, type: MessageType.EVENT, ideaId },
+  });
+  await prisma.conversation.update({
+    where: { id: conversationId },
+    data: { lastMessageAt: new Date() },
+  });
+
+  return { created: true };
 }
 
 // ─────────────────────────────────────────────
@@ -294,6 +565,13 @@ export async function reportContent(
   contentId: string,
   reason: string,
 ) {
+  // Evită rapoarte duplicate: un utilizator poate raporta același conținut o singură dată
+  const existing = await prisma.report.findFirst({
+    where: { reporterId, contentType, contentId },
+    select: { id: true },
+  });
+  if (existing) return existing;
+
   const report = await prisma.report.create({
     data: {
       reporterId,
@@ -305,17 +583,21 @@ export async function reportContent(
     select: { id: true },
   });
 
-  // Auto-blocare conținut la 3 rapoarte de utilizatori diferiți
-  const reportCount = await prisma.report.count({
-    where: { contentType, contentId, status: 'PENDING' },
-  });
-
-  if (reportCount >= 3 && contentType === 'IDEA') {
-    await prisma.blockedContent.upsert({
-      where: { ideaId: contentId },
-      create: { ideaId: contentId, reason: 'Auto-blocat: 3+ rapoarte' },
-      update: {},
+  // Auto-blocare la 3 utilizatori DIFERIȚI care raportează aceeași idee
+  // (numărăm reporteri distincți, nu total rapoarte — altfel o persoană ar putea abuza)
+  if (contentType === 'IDEA') {
+    const distinctReporters = await prisma.report.findMany({
+      where: { contentType, contentId, status: 'PENDING' },
+      distinct: ['reporterId'],
+      select: { reporterId: true },
     });
+    if (distinctReporters.length >= 3) {
+      await prisma.blockedContent.upsert({
+        where: { ideaId: contentId },
+        create: { ideaId: contentId, reason: 'Auto-blocat: 3+ rapoarte de la utilizatori diferiți' },
+        update: {},
+      });
+    }
   }
 
   return report;

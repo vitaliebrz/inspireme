@@ -165,6 +165,7 @@ router.post(
 // GET /api/v1/auth/reset-password/:token — validare token
 router.get(
   '/reset-password/:token',
+  authLimiter,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const valid = await validateResetToken(p(req, 'token'));
@@ -182,6 +183,7 @@ router.get(
 // POST /api/v1/auth/reset-password — AUTH-04
 router.post(
   '/reset-password',
+  authLimiter,
   resetPasswordValidators,
   validate,
   async (req: Request, res: Response, next: NextFunction) => {

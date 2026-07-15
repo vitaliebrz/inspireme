@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Check, Crown, Loader2, ExternalLink, AlertCircle } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 import { useSearchParams } from 'react-router-dom';
 
 interface SubscriptionStatus {
@@ -82,6 +83,7 @@ function formatDate(dt: string) {
 export default function SubscriptionsPage() {
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
+  const { toast } = useToast();
   const [status, setStatus] = useState<SubscriptionStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [interval, setInterval] = useState<'month' | 'year'>('month');
@@ -106,7 +108,7 @@ export default function SubscriptionsPage() {
       const { data } = await api.post<{ url: string }>('/subscriptions/checkout', { interval });
       if (data.url) window.location.href = data.url;
     } catch (err) {
-      alert((err as ApiError).response?.data?.error ?? 'Eroare la inițierea plății.');
+      toast((err as ApiError).response?.data?.error ?? 'Eroare la inițierea plății.', 'error');
     } finally {
       setCheckoutLoading(false);
     }
@@ -118,7 +120,7 @@ export default function SubscriptionsPage() {
       const { data } = await api.post<{ url: string }>('/subscriptions/portal');
       if (data.url) window.location.href = data.url;
     } catch (err) {
-      alert((err as ApiError).response?.data?.error ?? 'Eroare la accesarea portalului.');
+      toast((err as ApiError).response?.data?.error ?? 'Eroare la accesarea portalului.', 'error');
     } finally {
       setPortalLoading(false);
     }
@@ -171,8 +173,10 @@ export default function SubscriptionsPage() {
             </div>
           </div>
           <button onClick={() => void handlePortal()} disabled={portalLoading}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-50"
-            style={{ backgroundColor: 'var(--bg-3)', color: 'var(--text-2)', border: '1px solid var(--border)' }}>
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ backgroundColor: 'var(--bg-3)', color: 'var(--text-2)', border: '1px solid var(--border)' }}
+            onMouseEnter={(e) => { if (!portalLoading) e.currentTarget.style.backgroundColor = 'var(--bg-4)'; }}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-3)')}>
             {portalLoading ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />}
             Gestionează abonamentul
           </button>
@@ -184,7 +188,7 @@ export default function SubscriptionsPage() {
         <div className="flex items-center justify-center gap-3 mb-6">
           <button
             onClick={() => setInterval('month')}
-            className="px-5 py-2 rounded-xl text-sm font-medium transition-all"
+            className="px-5 py-2 rounded-xl text-sm font-medium cursor-pointer transition-colors"
             style={{
               backgroundColor: interval === 'month' ? 'rgba(246,166,35,0.12)' : 'var(--bg-2)',
               border: `1.5px solid ${interval === 'month' ? 'var(--orange)' : 'var(--border)'}`,
@@ -194,7 +198,7 @@ export default function SubscriptionsPage() {
           </button>
           <button
             onClick={() => setInterval('year')}
-            className="px-5 py-2 rounded-xl text-sm font-medium transition-all relative"
+            className="px-5 py-2 rounded-xl text-sm font-medium cursor-pointer transition-colors relative"
             style={{
               backgroundColor: interval === 'year' ? 'rgba(246,166,35,0.12)' : 'var(--bg-2)',
               border: `1.5px solid ${interval === 'year' ? 'var(--orange)' : 'var(--border)'}`,
@@ -285,7 +289,7 @@ export default function SubscriptionsPage() {
                 ) : (
                   <button
                     onClick={() => void handleCheckout()} disabled={checkoutLoading}
-                    className="py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
+                    className="py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 cursor-pointer hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                     style={{ backgroundColor: 'var(--orange)', color: '#fff' }}>
                     {checkoutLoading ? <Loader2 size={15} className="animate-spin" /> : <Crown size={15} />}
                     Upgrade la Pro

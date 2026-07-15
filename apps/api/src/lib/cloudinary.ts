@@ -34,3 +34,9 @@ export async function uploadPdf(buffer: Buffer, folder: string): Promise<string>
 export async function deleteAsset(publicId: string, resourceType: 'image' | 'raw' = 'image'): Promise<void> {
   await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
 }
+
+// Extrage publicId din URL Cloudinary (ex: "group_avatars/abc123" din https://res.cloudinary.com/.../upload/v123/group_avatars/abc123.jpg)
+export function extractPublicId(url: string): string | null {
+  const match = url.match(/\/upload\/(?:v\d+\/)?(.+?)(?:\.[^./]+)?$/);
+  return match?.[1] ?? null;
+}

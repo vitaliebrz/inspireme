@@ -1,26 +1,19 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Plus, Users, Lightbulb, Handshake, Gift } from 'lucide-react';
+import { Plus, Users, Lightbulb, Handshake, Gift, SlidersHorizontal, RefreshCw, Send, Loader2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 import { api } from '../../lib/api';
 import IdeaCard, { type IdeaCardData } from '../../components/feed/IdeaCard';
 import AntreprenorCard, { type AntreprenorCardData } from '../../components/feed/AntreprenorCard';
+import { getCategoryIcon } from '../../lib/categories';
+import { useCategories } from '../../lib/useCategories';
+
+type ApiError = { response?: { data?: { error?: string } } };
 
 interface FeedPageProps {
   tab?: 'antreprenori';
 }
-
-const CATEGORIES = [
-  { value: '', label: 'Toate' },
-  { value: 'ECO', label: 'Eco' },
-  { value: 'TECH', label: 'Tech' },
-  { value: 'ARTA', label: 'Artă' },
-  { value: 'EDUCATIE', label: 'Educație' },
-  { value: 'SANATATE', label: 'Sănătate' },
-  { value: 'SOCIAL', label: 'Social' },
-  { value: 'FOOD', label: 'Food' },
-  { value: 'FINANTE', label: 'Finanțe' },
-];
 
 interface Stats {
   ideas: number;
@@ -41,12 +34,24 @@ function formatNum(n: number): string {
 
 export default function FeedPage({ tab }: FeedPageProps) {
   const { user } = useAuth();
+  const { toast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
   const activeTab = tab ?? (location.pathname === '/feed/antreprenori' ? 'antreprenori' : 'idei');
 
+  const { categories: categoryList } = useCategories();
+
   const [category, setCategory] = useState('');
   const [stats, setStats] = useState<Stats | null>(null);
+
+  // Modal cerere de contact
+  const [contactTarget, setContactTarget] = useState<{ id: string; name: string } | null>(null);
+  const [sendingContact, setSendingContact] = useState(false);
+  const [contactResult, setContactResult] = useState<'sent' | 'error' | null>(null);
+  const [contactError, setContactError] = useState<string>('');
+
+  // Map userId → conversationId pentru conexiunile existente (construit client-side la mount)
+  const [connectedUsers, setConnectedUsers] = useState<Map<string, string>>(new Map());
 
   // Feed Idei state
   const [ideas, setIdeas] = useState<IdeaCardData[]>([]);
@@ -68,6 +73,21 @@ export default function FeedPage({ tab }: FeedPageProps) {
   useEffect(() => {
     api.get<Stats>('/feed/stats').then(({ data }) => setStats(data)).catch(() => null);
   }, []);
+
+  // Construiește map-ul userId → conversationId din conversațiile existente (o singură dată, client-side)
+  useEffect(() => {
+    if (!user) return;
+    api.get<{ conversations: Array<{ id: string; participantA: { id: string }; participantB: { id: string } }> }>('/chat/conversations')
+      .then(({ data }) => {
+        const map = new Map<string, string>();
+        for (const conv of data.conversations) {
+          const otherId = conv.participantA.id === user.id ? conv.participantB.id : conv.participantA.id;
+          map.set(otherId, conv.id);
+        }
+        setConnectedUsers(map);
+      })
+      .catch(() => null);
+  }, [user]);
 
   // Loader idei
   const loadIdeas = useCallback(async (reset = false) => {
@@ -149,6 +169,37 @@ export default function FeedPage({ tab }: FeedPageProps) {
     return () => obs.disconnect();
   }, [activeTab, ideiHasNext, antrHasNext, ideiLoading, antrLoading, loadIdeas, loadAntreprenori]);
 
+  const handleContact = async (id: string, name: string, ideaId?: string) => {
+    const existingConvId = connectedUsers.get(id);
+    if (existingConvId) {
+      if (ideaId) {
+        try { await api.post(`/chat/conversations/${existingConvId}/open-idea`, { ideaId }); } catch { /* idempotent */ }
+        navigate(`/chat/${existingConvId}?ideaId=${ideaId}`);
+      } else {
+        navigate(`/chat/${existingConvId}`);
+      }
+    } else {
+      setContactTarget({ id, name });
+    }
+  };
+
+  const handleSendContact = async () => {
+    if (!contactTarget) return;
+    setSendingContact(true);
+    setContactResult(null);
+    try {
+      await api.post('/chat/request', { toUserId: contactTarget.id });
+      setContactTarget(null);
+      setContactResult(null);
+      toast('Cerere trimisă cu succes!', 'success');
+    } catch (err) {
+      setContactError((err as ApiError).response?.data?.error ?? 'A apărut o eroare. Încearcă din nou.');
+      setContactResult('error');
+    } finally {
+      setSendingContact(false);
+    }
+  };
+
   const statsCards = [
     { label: 'Idei publicate', value: stats ? formatNum(stats.ideas) : '—', icon: <Lightbulb size={20} /> },
     { label: 'Utilizatori', value: stats ? formatNum(stats.users) : '—', icon: <Users size={20} /> },
@@ -180,19 +231,23 @@ export default function FeedPage({ tab }: FeedPageProps) {
       </div>
 
       {/* Tabs + buton postare */}
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
         <div className="flex gap-1 p-1 rounded-xl" style={{ backgroundColor: 'var(--bg-3)' }}>
           {(['idei', 'antreprenori'] as const).map((t) => (
             <button
               key={t}
               onClick={() => navigate(t === 'idei' ? '/feed' : '/feed/antreprenori')}
-              className="px-4 py-1.5 rounded-lg text-sm font-medium transition-all capitalize"
+              className="flex-1 sm:flex-none px-4 py-2 sm:py-1.5 rounded-lg text-sm font-medium cursor-pointer text-center"
               style={{
                 backgroundColor: activeTab === t ? 'var(--orange)' : 'transparent',
                 color: activeTab === t ? '#fff' : 'var(--text-2)',
+                transition: 'background-color 150ms ease, color 150ms ease',
               }}
+              onMouseEnter={(e) => { if (activeTab !== t) (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-4)'; }}
+              onMouseLeave={(e) => { if (activeTab !== t) (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; }}
             >
-              Feed {t === 'idei' ? 'Idei' : 'Antreprenori'}
+              <span className="sm:hidden">{t === 'idei' ? 'Idei' : 'Antreprenori'}</span>
+              <span className="hidden sm:inline">Feed {t === 'idei' ? 'Idei' : 'Antreprenori'}</span>
             </button>
           ))}
         </div>
@@ -200,8 +255,12 @@ export default function FeedPage({ tab }: FeedPageProps) {
         {user?.role === 'ELEV' && (
           <button
             onClick={() => navigate('/idea/new')}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-opacity hover:opacity-90"
-            style={{ backgroundColor: 'var(--orange)', color: '#fff' }}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 sm:py-2 rounded-xl text-sm font-semibold cursor-pointer hover:opacity-90"
+            style={{
+              backgroundColor: 'var(--orange)',
+              color: '#fff',
+              transition: 'opacity 150ms ease',
+            }}
           >
             <Plus size={16} />
             Postează idee
@@ -212,20 +271,28 @@ export default function FeedPage({ tab }: FeedPageProps) {
       {/* Filtre categorii — doar pe tab-ul idei */}
       {activeTab === 'idei' && (
         <div className="flex flex-wrap gap-2 mb-6">
-          {CATEGORIES.map((c) => (
-            <button
-              key={c.value}
-              onClick={() => setCategory(c.value)}
-              className="px-3 py-1.5 rounded-full text-sm font-medium transition-all"
-              style={{
-                backgroundColor: category === c.value ? 'var(--orange)' : 'var(--bg-3)',
-                color: category === c.value ? '#fff' : 'var(--text-2)',
-                border: '1px solid ' + (category === c.value ? 'var(--orange)' : 'var(--border)'),
-              }}
-            >
-              {c.label}
-            </button>
-          ))}
+          {[{ value: '', label: 'Toate' }, ...categoryList.map((c) => ({ value: c.name, label: c.name }))].map((c) => {
+            const Icon = getCategoryIcon(c.label);
+            const active = category === c.value;
+            return (
+              <button
+                key={c.value}
+                onClick={() => setCategory(c.value)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium cursor-pointer"
+                style={{
+                  backgroundColor: active ? 'var(--orange)' : 'var(--bg-3)',
+                  color: active ? '#fff' : 'var(--text-2)',
+                  border: '1px solid ' + (active ? 'var(--orange)' : 'var(--border)'),
+                  transition: 'background-color 150ms ease, color 150ms ease',
+                }}
+                onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-4)'; }}
+                onMouseLeave={(e) => { if (!active) (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-3)'; }}
+              >
+                {Icon && <Icon size={13} />}
+                {c.label}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -233,13 +300,22 @@ export default function FeedPage({ tab }: FeedPageProps) {
       {activeTab === 'idei' ? (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {ideas.map((idea) => (
+            {ideas.map((idea) => {
+              const ideaOwnerName = idea.user.profileElev
+                ? `${idea.user.profileElev.firstName} ${idea.user.profileElev.lastName}`
+                : 'Utilizator';
+              const isSelf = idea.user.id === user?.id;
+              return (
               <IdeaCard
                 key={idea.id}
                 idea={idea}
                 onClick={() => navigate(`/idea/${idea.id}`)}
+                onViewProfile={() => navigate(`/profile/${idea.user.id}`)}
+                isConnected={!isSelf && connectedUsers.has(idea.user.id)}
+                onContact={isSelf ? undefined : () => void handleContact(idea.user.id, ideaOwnerName, idea.id)}
               />
-            ))}
+              );
+            })}
             {isLoading && Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="skeleton h-64 rounded-2xl" />
             ))}
@@ -247,6 +323,8 @@ export default function FeedPage({ tab }: FeedPageProps) {
           {!ideiLoading && ideas.length === 0 && !ideiError && (
             <EmptyState
               message={category ? 'Nicio idee în această categorie.' : 'Nicio idee publicată încă. Fii primul!'}
+              withFilter={!!category}
+              onClearFilter={() => setCategory('')}
             />
           )}
           {ideiError && !ideiLoading && (
@@ -256,13 +334,22 @@ export default function FeedPage({ tab }: FeedPageProps) {
       ) : (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {antreprenori.map((a) => (
+            {antreprenori.map((a) => {
+              const antrName = a.profileAntreprenor
+                ? `${a.profileAntreprenor.firstName} ${a.profileAntreprenor.lastName}`
+                : 'Antreprenor';
+              const isSelf = a.id === user?.id;
+              return (
               <AntreprenorCard
                 key={a.id}
                 antreprenor={a}
-                onClick={() => navigate(`/profile/antreprenor/${a.id}`)}
+                onClick={() => navigate(`/profile/${a.id}`)}
+                onViewProfile={() => navigate(`/profile/${a.id}`)}
+                isConnected={!isSelf && connectedUsers.has(a.id)}
+                onContact={isSelf ? undefined : () => handleContact(a.id, antrName)}
               />
-            ))}
+              );
+            })}
             {isLoading && Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="skeleton h-44 rounded-2xl" />
             ))}
@@ -278,28 +365,99 @@ export default function FeedPage({ tab }: FeedPageProps) {
 
       {/* Sentinel pentru infinite scroll */}
       <div ref={sentinelRef} className="h-8" />
+
+      {/* Modal cerere de contact */}
+      {contactTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}>
+          <div className="w-full max-w-sm rounded-2xl p-6"
+            style={{ backgroundColor: 'var(--bg-2)', border: '1px solid var(--border)' }}>
+
+            <h3 className="text-base font-bold mb-1" style={{ color: 'var(--text)' }}>
+              Trimite cerere de mesaj
+            </h3>
+            <p className="text-sm mb-4" style={{ color: 'var(--text-2)' }}>
+              Trimite o cerere de conectare lui{' '}
+              <strong style={{ color: 'var(--text)' }}>{contactTarget.name}</strong>.
+              Dacă acceptă, veți putea comunica prin chat.
+            </p>
+
+            {contactResult === 'error' && (
+              <div className="mb-4 px-3 py-2.5 rounded-xl text-sm"
+                style={{ backgroundColor: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444' }}>
+                {contactError}
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setContactTarget(null); setContactResult(null); }}
+                className="flex-1 py-2.5 rounded-xl text-sm font-medium cursor-pointer"
+                style={{ backgroundColor: 'var(--bg-3)', color: 'var(--text-2)' }}>
+                Anulează
+              </button>
+              <button
+                onClick={() => void handleSendContact()}
+                disabled={sendingContact}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold cursor-pointer disabled:opacity-40 flex items-center justify-center gap-2"
+                style={{ backgroundColor: 'var(--orange)', color: '#fff' }}>
+                {sendingContact ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                Trimite cererea
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function EmptyState({ message }: { message: string }) {
+function EmptyState({ message, withFilter, onClearFilter }: { message: string; withFilter?: boolean; onClearFilter?: () => void }) {
   return (
-    <div className="text-center py-16">
-      <p className="text-base font-medium" style={{ color: 'var(--text-2)' }}>{message}</p>
+    <div className="flex flex-col items-center py-20 gap-4">
+      <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
+        style={{ backgroundColor: 'var(--bg-3)' }}>
+        <SlidersHorizontal size={24} style={{ color: 'var(--text-2)' }} />
+      </div>
+      <div className="text-center">
+        <p className="text-base font-semibold mb-1" style={{ color: 'var(--text)' }}>{message}</p>
+        {withFilter && (
+          <p className="text-sm" style={{ color: 'var(--text-2)' }}>Încearcă un alt filtru sau șterge selecția curentă.</p>
+        )}
+      </div>
+      {withFilter && onClearFilter && (
+        <button
+          onClick={onClearFilter}
+          className="px-4 py-2 rounded-xl text-sm font-medium cursor-pointer"
+          style={{ backgroundColor: 'var(--bg-3)', color: 'var(--text)', border: '1px solid var(--border)' }}
+          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-4)')}
+          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-3)')}
+        >
+          Șterge filtrul
+        </button>
+      )}
     </div>
   );
 }
 
 function ErrorState({ onRetry }: { onRetry: () => void }) {
   return (
-    <div className="text-center py-16">
-      <p className="text-base font-medium mb-3" style={{ color: 'var(--text-2)' }}>
-        Nu s-au putut încărca datele. Verifică conexiunea.
-      </p>
+    <div className="flex flex-col items-center py-20 gap-4">
+      <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
+        style={{ backgroundColor: 'rgba(239,68,68,0.08)' }}>
+        <RefreshCw size={24} style={{ color: '#ef4444' }} />
+      </div>
+      <div className="text-center">
+        <p className="text-base font-semibold mb-1" style={{ color: 'var(--text)' }}>Nu s-au putut încărca datele</p>
+        <p className="text-sm" style={{ color: 'var(--text-2)' }}>Verifică conexiunea și încearcă din nou.</p>
+      </div>
       <button
         onClick={onRetry}
-        className="px-4 py-2 rounded-xl text-sm font-medium"
-        style={{ backgroundColor: 'var(--bg-3)', color: 'var(--text-2)', border: '1px solid var(--border)' }}
+        className="px-4 py-2 rounded-xl text-sm font-medium cursor-pointer"
+        style={{ backgroundColor: 'var(--bg-3)', color: 'var(--text)', border: '1px solid var(--border)' }}
+        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-4)')}
+        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-3)')}
       >
         Încearcă din nou
       </button>

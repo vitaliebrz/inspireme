@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
 import { query } from 'express-validator';
-import { IdeaCategory } from '@prisma/client';
 import { authenticate } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { generalLimiter } from '../middleware/rateLimiter.js';
@@ -26,14 +25,14 @@ router.get('/stats', async (_req: Request, res: Response) => {
 router.get(
   '/ideas',
   [
-    query('category').optional().isIn(Object.values(IdeaCategory)),
+    query('category').optional().isString().trim().isLength({ min: 1, max: 50 }),
     query('cursor').optional().isString(),
   ],
   validate,
   async (req: Request, res: Response) => {
     try {
       const userId = req.user!.sub;
-      const category = req.query['category'] as IdeaCategory | undefined;
+      const category = req.query['category'] as string | undefined;
       const cursor = req.query['cursor'] as string | undefined;
       const result = await getIdeasFeed({ userId, category, cursor });
       res.json(result);

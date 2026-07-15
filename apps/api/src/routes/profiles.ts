@@ -5,7 +5,7 @@ import { authenticate } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { generalLimiter, uploadLimiter } from '../middleware/rateLimiter.js';
 import { uploadAvatar, compressToWebp } from '../middleware/upload.js';
-import { cloudinary } from '../lib/cloudinary.js';
+import { cloudinary, deleteAsset, extractPublicId } from '../lib/cloudinary.js';
 import {
   getMyProfile, updateElevProfile, updateAntreprenorProfile,
   getPublicElevProfile, getPublicAntreprenorProfile,
@@ -103,6 +103,16 @@ router.post(
       const file = req.file;
       if (!file) { res.status(400).json({ error: 'Niciun fișier primit.' }); return; }
 
+      const userId = req.user!.sub;
+      const role = req.user!.role as Role;
+
+      // Citim avatarUrl-ul curent înainte de upload
+      const existing = await getMyProfile(userId, role);
+      const oldAvatarUrl =
+        role === Role.ELEV
+          ? (existing as { profileElev?: { avatarUrl?: string | null } })?.profileElev?.avatarUrl
+          : (existing as { profileAntreprenor?: { avatarUrl?: string | null } })?.profileAntreprenor?.avatarUrl;
+
       const webpBuffer = await compressToWebp(file.buffer, { width: 400, height: 400, quality: 85 });
       const uploaded = await new Promise<{ secure_url: string; public_id: string }>((resolve, reject) => {
         cloudinary.uploader.upload_stream(
@@ -114,12 +124,16 @@ router.post(
         ).end(webpBuffer);
       });
 
-      const userId = req.user!.sub;
-      const role = req.user!.role as Role;
       if (role === Role.ELEV) {
         await updateElevProfile({ userId, avatarUrl: uploaded.secure_url });
       } else {
         await updateAntreprenorProfile({ userId, avatarUrl: uploaded.secure_url });
+      }
+
+      // Ștergem avatarul vechi din Cloudinary după ce DB-ul e actualizat
+      if (oldAvatarUrl) {
+        const oldPublicId = extractPublicId(oldAvatarUrl);
+        if (oldPublicId) deleteAsset(oldPublicId, 'image').catch(() => {});
       }
 
       res.json({ avatarUrl: uploaded.secure_url });

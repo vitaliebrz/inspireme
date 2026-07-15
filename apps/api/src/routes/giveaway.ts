@@ -30,7 +30,7 @@ router.get(
   async (req: Request, res: Response) => {
     try {
       const status = req.query['status'] as GiveawayStatus | undefined;
-      const giveaways = await getGiveaways(status);
+      const giveaways = await getGiveaways(status, req.user!.sub);
       res.json({ giveaways });
     } catch (err) { handleError(err, res); }
   },
@@ -39,7 +39,9 @@ router.get(
 // GET /giveaways/mine — giveaway-urile antreprenorului curent
 router.get('/mine', async (req: Request, res: Response) => {
   try {
-    if (req.user!.role !== 'ANTREPRENOR') { res.status(403).json({ error: 'Doar antreprenorii.' }); return; }
+    if (req.user!.role !== 'ANTREPRENOR' && req.user!.role !== 'ADMIN') {
+      res.status(403).json({ error: 'Doar antreprenorii.' }); return;
+    }
     const giveaways = await getMyGiveaways(req.user!.sub);
     res.json({ giveaways });
   } catch (err) { handleError(err, res); }
@@ -53,7 +55,7 @@ router.post(
   [
     body('title').isString().trim().isLength({ min: 5, max: 200 }),
     body('description').isString().trim().isLength({ min: 20, max: 5000 }),
-    body('investmentDescription').isString().trim().isLength({ min: 10, max: 1000 }),
+    body('investmentDescription').isString().trim().isLength({ min: 3, max: 1000 }),
     body('startDate').isISO8601(),
     body('endDate').isISO8601(),
     body('maxParticipants').optional().isInt({ min: 2, max: 10000 }),
@@ -61,14 +63,17 @@ router.post(
   validate,
   async (req: Request, res: Response) => {
     try {
-      if (req.user!.role !== 'ANTREPRENOR') { res.status(403).json({ error: 'Doar antreprenorii.' }); return; }
+      if (req.user!.role !== 'ANTREPRENOR' && req.user!.role !== 'ADMIN') {
+        res.status(403).json({ error: 'Doar antreprenorii.' }); return;
+      }
       const { title, description, investmentDescription, startDate, endDate, maxParticipants } = req.body as {
         title: string; description: string; investmentDescription: string;
         startDate: string; endDate: string; maxParticipants?: number;
       };
+      const antreprenorPlan = req.user!.role === 'ADMIN' ? Plan.PRO : req.user!.plan as Plan;
       const giveaway = await createGiveaway({
         antreprenorId: req.user!.sub,
-        antreprenorPlan: req.user!.plan as Plan,
+        antreprenorPlan,
         title, description, investmentDescription,
         startDate: new Date(startDate),
         endDate: new Date(endDate),
@@ -137,7 +142,9 @@ router.post(
   validate,
   async (req: Request, res: Response) => {
     try {
-      if (req.user!.role !== 'ANTREPRENOR') { res.status(403).json({ error: 'Doar antreprenorii.' }); return; }
+      if (req.user!.role !== 'ANTREPRENOR' && req.user!.role !== 'ADMIN') {
+        res.status(403).json({ error: 'Doar antreprenorii.' }); return;
+      }
       const result = await selectWinner(req.params['id'] as string, req.user!.sub);
       res.json(result);
     } catch (err) { handleError(err, res); }
@@ -153,8 +160,7 @@ router.post(
   validate,
   async (req: Request, res: Response) => {
     try {
-      if (req.user!.role !== 'ANTREPRENOR') { res.status(403).json({ error: 'Doar antreprenorii.' }); return; }
-      const result = await confirmInvestment(req.params['id'] as string, req.user!.sub);
+      const result = await confirmInvestment(req.params['id'] as string, req.user!.sub, req.user!.role);
       res.json(result);
     } catch (err) { handleError(err, res); }
   },

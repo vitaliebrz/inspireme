@@ -1,7 +1,44 @@
 import multer from 'multer';
 import { Request } from 'express';
+import sharp from 'sharp';
+import heicConvert from 'heic-convert';
 
-const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+// Detectare HEIC prin magic bytes (ftyp la offset 4)
+function isHeicBuffer(buffer: Buffer): boolean {
+  if (buffer.length < 12) return false;
+  if (buffer.slice(4, 8).toString('ascii') !== 'ftyp') return false;
+  const brand = buffer.slice(8, 12).toString('ascii');
+  return ['heic', 'heix', 'hevc', 'hevx', 'mif1', 'msf1', 'MiHE', 'MiHB'].includes(brand);
+}
+
+// Compresie WebP: max lățime/înălțime + calitate reglabilă
+// HEIC este convertit la JPEG mai întâi (heic-convert), apoi procesat de sharp
+// Cloudinary servește AVIF automat (fetch_format: 'auto') browserelor care îl suportă
+export async function compressToWebp(
+  buffer: Buffer,
+  opts: { width?: number; height?: number; quality?: number } = {},
+): Promise<Buffer> {
+  const { width = 2560, height = 2560, quality = 92 } = opts;
+
+  let processBuffer = buffer;
+  if (isHeicBuffer(buffer)) {
+    const jpegArrayBuffer = await heicConvert({
+      buffer: new Uint8Array(buffer),
+      format: 'JPEG',
+      quality: 0.95,
+    });
+    processBuffer = Buffer.from(jpegArrayBuffer);
+  }
+
+  return sharp(processBuffer)
+    .rotate()
+    .resize(width, height, { fit: 'inside', withoutEnlargement: true })
+    .withMetadata({ exif: {} })
+    .webp({ quality, effort: 4 })
+    .toBuffer();
+}
+
+const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'] as const;
 const ALLOWED_PDF_TYPE = 'application/pdf';
 const ALLOWED_CHAT_TYPES = [...ALLOWED_IMAGE_TYPES, ALLOWED_PDF_TYPE] as const;
 
@@ -14,6 +51,7 @@ const MAGIC_BYTES: Record<string, Buffer> = {
 };
 
 export function validateMagicBytes(buffer: Buffer, mimeType: string): boolean {
+  if (mimeType === 'image/heic' || mimeType === 'image/heif') return isHeicBuffer(buffer);
   const magic = MAGIC_BYTES[mimeType];
   if (!magic) return false;
   // WebP are RIFF la 0 și WEBP la 8 — verificăm ambele
@@ -64,15 +102,15 @@ export const uploadChatFile = multer({
   },
 });
 
-// Upload avatar (max 2MB)
+// Upload avatar (max 10MB — sharp comprimă oricum la WebP mic)
 export const uploadAvatar = multer({
   storage: memoryStorage,
-  limits: { fileSize: 2 * 1024 * 1024, files: 1 },
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
   fileFilter: (_req, file, cb) => {
     if ((ALLOWED_IMAGE_TYPES as readonly string[]).includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Doar imagini JPG, PNG sau WebP sunt permise pentru avatar.'));
+      cb(new Error(`Format nesuportat: ${file.mimetype}. Folosește JPG, PNG sau WebP.`));
     }
   },
 });

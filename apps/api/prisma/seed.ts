@@ -1,4 +1,4 @@
-import { PrismaClient, Role, Plan, IdeaCategory, IdeaVisibility } from '@prisma/client';
+import { PrismaClient, Role, Plan, IdeaVisibility } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
@@ -86,7 +86,7 @@ async function main(): Promise<void> {
       id: 'demo-idea-001',
       userId: elev.id,
       title: 'EcoTrack — Aplicație monitorizare amprenta carbon',
-      category: IdeaCategory.ECO,
+      categories: ['Eco'],
       problem: 'Tinerii nu sunt conștienți de impactul zilnic al acțiunilor lor asupra mediului. Nu există o modalitate simplă și gamificată de a urmări și reduce amprenta de carbon la nivel individual.',
       solution: 'O aplicație mobilă care calculează automat amprenta de carbon pe baza obiceiurilor zilnice (transport, alimentație, consum energie) și gamifică procesul de reducere prin provocări, badge-uri și comparații cu prietenii.',
       targetAudience: 'Tineri 15-25 ani, studenți și elevi conștienți de problemele de mediu.',
@@ -97,6 +97,27 @@ async function main(): Promise<void> {
     },
   });
   console.log('Idee demo creată:', idea.title);
+
+  // Categorii dinamice — inserăm doar dacă nu există deja
+  const defaultCategories = [
+    { name: 'Eco',       iconName: 'Leaf',       order: 0 },
+    { name: 'Tech',      iconName: 'Cpu',        order: 1 },
+    { name: 'Artă',      iconName: 'Palette',    order: 2 },
+    { name: 'Educație',  iconName: 'BookOpen',   order: 3 },
+    { name: 'Sănătate',  iconName: 'HeartPulse', order: 4 },
+    { name: 'Social',    iconName: 'Heart',      order: 5 },
+    { name: 'Food',      iconName: 'Utensils',   order: 6 },
+    { name: 'Finanțe',   iconName: 'TrendingUp', order: 7 },
+  ];
+
+  for (const cat of defaultCategories) {
+    await prisma.category.upsert({
+      where: { name: cat.name },
+      update: { iconName: cat.iconName },
+      create: cat,
+    });
+  }
+  console.log('Categorii inserate:', defaultCategories.map((c) => c.name).join(', '));
 
   console.log('\n✅ Seed complet!');
   console.log('Admin: admin@inspireme.ro / Admin@2026!');

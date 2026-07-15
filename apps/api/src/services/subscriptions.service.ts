@@ -1,6 +1,7 @@
 import Stripe from 'stripe';
-import { Plan, Role } from '@prisma/client';
+import { Plan, Role, NotificationType } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
+import { sendPaymentFailedEmail, createNotification } from './notifications.service.js';
 
 const stripe = new Stripe(process.env['STRIPE_SECRET_KEY'] ?? '', { apiVersion: '2025-02-24.acacia' });
 
@@ -169,6 +170,8 @@ export async function handleStripeWebhook(payload: Buffer, signature: string) {
             body: 'Verifică metoda de plată pentru a evita pierderea accesului Pro.',
           },
         });
+        const user = await prisma.user.findUnique({ where: { id: sub.userId }, select: { email: true } });
+        if (user) sendPaymentFailedEmail(user.email).catch(() => {});
       }
       break;
     }
@@ -209,4 +212,56 @@ export async function handleStripeWebhook(payload: Buffer, signature: string) {
   }
 
   return { received: true };
+}
+
+// ─────────────────────────────────────────────
+// JOB ZILNIC — notificare abonament pe cale să expire
+// Notificăm doar abonamentele care NU se vor reînnoi (cancel_at_period_end la Stripe),
+// ca să evităm avertismente false pentru cele cu reînnoire automată.
+// ─────────────────────────────────────────────
+
+export async function notifyExpiringSubscriptions(): Promise<void> {
+  const now = new Date();
+  const in3Days = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+
+  const subs = await prisma.subscription.findMany({
+    where: {
+      cancelledAt: null,
+      stripeSubscriptionId: { not: null },
+      currentPeriodEnd: { gte: now, lte: in3Days },
+    },
+    select: { id: true, userId: true, currentPeriodEnd: true, stripeSubscriptionId: true },
+  });
+
+  for (const sub of subs) {
+    // Verificăm la Stripe dacă abonamentul se anulează la finalul perioadei
+    let willCancel = false;
+    try {
+      const s = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId!);
+      willCancel = s.cancel_at_period_end === true || s.status === 'canceled';
+    } catch {
+      continue; // nu putem verifica → nu trimitem (evită fals-pozitive)
+    }
+    if (!willCancel) continue; // se reînnoiește automat — nu e „expirare"
+
+    // Dedup — o singură notificare per user în ultimele 7 zile
+    const recent = await prisma.notification.findFirst({
+      where: {
+        userId: sub.userId,
+        type: NotificationType.SUBSCRIPTION_EXPIRING,
+        createdAt: { gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) },
+      },
+      select: { id: true },
+    });
+    if (recent) continue;
+
+    const days = Math.max(1, Math.ceil((sub.currentPeriodEnd!.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)));
+    createNotification({
+      userId: sub.userId,
+      type: NotificationType.SUBSCRIPTION_EXPIRING,
+      title: 'Abonamentul Pro expiră curând',
+      body: `Abonamentul tău Pro se încheie în ${days} ${days === 1 ? 'zi' : 'zile'} și nu se va reînnoi. Reactivează-l pentru a păstra beneficiile.`,
+      data: { subscriptionId: sub.id },
+    }).catch(() => {});
+  }
 }

@@ -9,6 +9,9 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      devOptions: {
+        enabled: false, // SW dezactivat în dev — altfel cachează tot și blochează HMR
+      },
       includeAssets: ['favicon.svg', 'manifest.json'],
       manifest: false, // folosim manifest.json din public/
       workbox: {
@@ -28,13 +31,19 @@ export default defineConfig({
       },
     }),
   ],
+  server: {
+    host: '0.0.0.0',
+  },
+  preview: {
+    host: '0.0.0.0',
+  },
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom', 'react-router-dom'],
-          ui: ['lucide-react'],
-          socket: ['socket.io-client'],
+        manualChunks(id) {
+          if (id.includes('react') || id.includes('react-dom') || id.includes('react-router-dom')) return 'vendor';
+          if (id.includes('lucide-react')) return 'ui';
+          if (id.includes('socket.io-client')) return 'socket';
         },
       },
     },

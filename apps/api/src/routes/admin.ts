@@ -2,12 +2,15 @@ import { Router, Request, Response } from 'express';
 import { body, param, query } from 'express-validator';
 import { Role } from '@prisma/client';
 import { authenticate, requireAdmin } from '../middleware/auth.js';
+import { guessIconName } from '../lib/guessIcon.js';
 import { validate } from '../middleware/validate.js';
 import { generalLimiter } from '../middleware/rateLimiter.js';
 import {
   getDashboardStats, getUsers, getPendingReports, resolveReport,
-  getBlockedContent, unblockContent, suspendUser, unsuspendUser,
+  getBlockedContent, unblockContent, suspendUser, unsuspendUser, deleteUser,
 } from '../services/admin.service.js';
+import { prisma } from '../lib/prisma.js';
+import { createNotification, sendCategoryDeletedEmail } from '../services/notifications.service.js';
 
 const router = Router();
 router.use(authenticate);
@@ -76,6 +79,19 @@ router.post(
   },
 );
 
+// DELETE /admin/users/:id
+router.delete(
+  '/users/:id',
+  [param('id').isUUID()],
+  validate,
+  async (req: Request, res: Response) => {
+    try {
+      const result = await deleteUser(req.params['id'] as string, req.user!.sub);
+      res.json(result);
+    } catch (err) { handleError(err, res); }
+  },
+);
+
 // GET /admin/reports
 router.get('/reports', async (req: Request, res: Response) => {
   try {
@@ -124,6 +140,134 @@ router.delete(
     try {
       const result = await unblockContent(req.params['ideaId'] as string);
       res.json(result);
+    } catch (err) { handleError(err, res); }
+  },
+);
+
+// ─────────────────────────────────────────────
+// Categorii dinamice
+// ─────────────────────────────────────────────
+
+// POST /admin/categories — adaugă categorie nouă
+router.post(
+  '/categories',
+  [
+    body('name')
+      .isString().trim()
+      .isLength({ min: 2, max: 50 })
+      .withMessage('Numele categoriei trebuie să aibă 2-50 caractere.'),
+  ],
+  validate,
+  async (req: Request, res: Response) => {
+    try {
+      const raw = (req.body as { name: string }).name.trim();
+      const name = raw.charAt(0).toUpperCase() + raw.slice(1);
+      const exists = await prisma.category.findUnique({ where: { name } });
+      if (exists) {
+        res.status(409).json({ error: 'Categoria există deja.' });
+        return;
+      }
+      const iconName = guessIconName(name);
+      const maxOrder = await prisma.category.aggregate({ _max: { order: true } });
+      const order = (maxOrder._max.order ?? -1) + 1;
+      const category = await prisma.category.create({
+        data: { name, iconName, order },
+        select: { id: true, name: true, iconName: true, order: true },
+      });
+      res.status(201).json(category);
+    } catch (err) { handleError(err, res); }
+  },
+);
+
+// PATCH /admin/categories/:id/icon — setează iconul manual
+router.patch(
+  '/categories/:id/icon',
+  [
+    param('id').isUUID(),
+    body('iconName').optional({ nullable: true }).isString().trim().isLength({ max: 50 }),
+  ],
+  validate,
+  async (req: Request, res: Response) => {
+    try {
+      const id = req.params['id'] as string;
+      const { iconName } = req.body as { iconName: string | null };
+      const cat = await prisma.category.update({
+        where: { id },
+        data: { iconName: iconName ?? null },
+        select: { id: true, name: true, iconName: true, order: true },
+      });
+      res.json(cat);
+    } catch (err) { handleError(err, res); }
+  },
+);
+
+// DELETE /admin/categories/:name — șterge categorie, auto-elimină din idei, notifică elevii
+router.delete(
+  '/categories/:name',
+  [
+    param('name').isString().trim().isLength({ min: 2, max: 50 }),
+    body('message').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
+  ],
+  validate,
+  async (req: Request, res: Response) => {
+    try {
+      const name = decodeURIComponent(req.params['name'] as string);
+      const { message } = req.body as { message?: string };
+
+      const category = await prisma.category.findUnique({
+        where: { name },
+        select: { createdByUserId: true },
+      });
+      if (!category) {
+        res.status(404).json({ error: 'Categoria nu a fost găsită.' });
+        return;
+      }
+
+      // Găsim toți elevii care au idei cu această categorie
+      const affectedIdeas = await prisma.idea.findMany({
+        where: { categories: { has: name } },
+        select: { userId: true },
+      });
+
+      // Includem și creatorul categoriei (chiar dacă n-a salvat o idee cu ea)
+      const ideaOwnerIds = affectedIdeas.map((i) => i.userId);
+      const allUserIds = [...new Set([
+        ...ideaOwnerIds,
+        ...(category.createdByUserId ? [category.createdByUserId] : []),
+      ])];
+
+      // Eliminăm categoria din toate ideile (SQL direct — Prisma nu suportă array_remove)
+      await prisma.$executeRaw`UPDATE ideas SET categories = array_remove(categories, ${name}) WHERE ${name} = ANY(categories)`;
+
+      await prisma.category.delete({ where: { name } });
+
+      // Mesaj de notificare — default dacă adminul nu a scris nimic
+      const reason = message?.trim()
+        || 'Categoria nu îndeplinea criteriile platformei sau era prea generală.';
+      const notifBody = `Categoria „${name}" a fost eliminată. ${reason} Categoria a fost eliminată automat din ideile tale.`;
+
+      // Notificăm în-app + email fiecare utilizator afectat
+      const users = await prisma.user.findMany({
+        where: { id: { in: allUserIds } },
+        select: { id: true, email: true },
+      });
+
+      await Promise.all(
+        users.map(async (user) => {
+          await createNotification({
+            userId: user.id,
+            type: 'SYSTEM',
+            title: `Categorie eliminată: ${name}`,
+            body: notifBody,
+            data: { categoryName: name },
+          });
+          await sendCategoryDeletedEmail(user.email, name, reason).catch(() => {
+            // email nu blochează răspunsul
+          });
+        }),
+      );
+
+      res.json({ success: true, affectedUsers: users.length });
     } catch (err) { handleError(err, res); }
   },
 );

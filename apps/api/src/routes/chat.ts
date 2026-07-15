@@ -4,12 +4,12 @@ import { MessageType, Plan } from '@prisma/client';
 import { authenticate } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { generalLimiter, uploadLimiter } from '../middleware/rateLimiter.js';
-import { uploadChatFile } from '../middleware/upload.js';
+import { uploadChatFile, validateMagicBytes } from '../middleware/upload.js';
 import { cloudinary } from '../lib/cloudinary.js';
 import {
   createConnectionRequest, respondToConnectionRequest, getPendingRequests,
-  getConversations, getMessages, sendMessage,
-  blockUser, unblockUser, reportContent,
+  getConversations, getConversationWith, getMessages, sendMessage,
+  markMessagesAsRead, blockUser, unblockUser, reportContent, openIdeaInConversation,
 } from '../services/chat.service.js';
 
 const router = Router();
@@ -26,7 +26,7 @@ function handleError(err: unknown, res: Response) {
 // CERERI CONECTARE
 // ─────────────────────────────────────────────
 
-// POST /chat/connect — antreprenor trimite cerere
+// POST /chat/connect — antreprenor trimite cerere legată de o idee
 router.post(
   '/connect',
   [
@@ -39,6 +39,27 @@ router.post(
       if (req.user!.role !== 'ANTREPRENOR') { res.status(403).json({ error: 'Doar antreprenorii pot trimite cereri.' }); return; }
       const { toUserId, ideaId } = req.body as { toUserId: string; ideaId: string };
       const result = await createConnectionRequest(req.user!.sub, req.user!.plan as Plan, toUserId, ideaId);
+      res.status(201).json(result);
+    } catch (err) { handleError(err, res); }
+  },
+);
+
+// POST /chat/request — cerere de mesaj directă (fără ideaId, orice rol)
+router.post(
+  '/request',
+  [
+    body('toUserId').isUUID(),
+    body('message').optional().isString().trim().isLength({ max: 500 }),
+  ],
+  validate,
+  async (req: Request, res: Response) => {
+    try {
+      const { toUserId } = req.body as { toUserId: string };
+      if (toUserId === req.user!.sub) {
+        res.status(400).json({ error: 'Nu poți trimite o cerere ție însuți.' });
+        return;
+      }
+      const result = await createConnectionRequest(req.user!.sub, req.user!.plan as Plan, toUserId);
       res.status(201).json(result);
     } catch (err) { handleError(err, res); }
   },
@@ -81,6 +102,19 @@ router.get('/conversations', async (req: Request, res: Response) => {
   } catch (err) { handleError(err, res); }
 });
 
+// GET /chat/with/:userId — verifică dacă există deja o conversație cu un utilizator
+router.get(
+  '/with/:userId',
+  [param('userId').isUUID()],
+  validate,
+  async (req: Request, res: Response) => {
+    try {
+      const result = await getConversationWith(req.user!.sub, req.params['userId'] as string);
+      res.json(result ?? { conversationId: null });
+    } catch (err) { handleError(err, res); }
+  },
+);
+
 // GET /chat/conversations/:id/messages
 router.get(
   '/conversations/:id/messages',
@@ -101,19 +135,54 @@ router.post(
   [
     param('id').isUUID(),
     body('content').isString().trim().isLength({ min: 1, max: 4000 }),
+    body('replyToId').optional().isUUID(),
+    body('ideaId').optional().isUUID(),
   ],
   validate,
   async (req: Request, res: Response) => {
     try {
-      const { content } = req.body as { content: string };
+      const { content, replyToId, ideaId } = req.body as { content: string; replyToId?: string; ideaId?: string };
       const message = await sendMessage(
         req.params['id'] as string,
         req.user!.sub,
         req.user!.plan as Plan,
         content,
         MessageType.TEXT,
+        undefined,
+        replyToId,
+        ideaId,
       );
       res.status(201).json(message);
+    } catch (err) { handleError(err, res); }
+  },
+);
+
+// POST /chat/conversations/:id/open-idea — creează EVENT idempotent când deschizi conv. despre o idee nouă
+router.post(
+  '/conversations/:id/open-idea',
+  [
+    param('id').isUUID(),
+    body('ideaId').isUUID(),
+  ],
+  validate,
+  async (req: Request, res: Response) => {
+    try {
+      const { ideaId } = req.body as { ideaId: string };
+      const result = await openIdeaInConversation(req.params['id'] as string, req.user!.sub, ideaId);
+      res.json(result);
+    } catch (err) { handleError(err, res); }
+  },
+);
+
+// PATCH /chat/conversations/:id/read — marchează mesajele celuilalt ca citite
+router.patch(
+  '/conversations/:id/read',
+  [param('id').isUUID()],
+  validate,
+  async (req: Request, res: Response) => {
+    try {
+      const readAt = await markMessagesAsRead(req.params['id'] as string, req.user!.sub);
+      res.json({ readAt });
     } catch (err) { handleError(err, res); }
   },
 );
@@ -127,6 +196,12 @@ router.post(
     try {
       const file = req.file;
       if (!file) { res.status(400).json({ error: 'Niciun fișier primit.' }); return; }
+
+      // Validare tip REAL prin magic bytes (nu doar mimetype)
+      if (!validateMagicBytes(file.buffer, file.mimetype)) {
+        res.status(400).json({ error: 'Fișier invalid sau tip nepermis.' });
+        return;
+      }
 
       const isImage = file.mimetype.startsWith('image/');
       const uploaded = await cloudinary.uploader.upload(

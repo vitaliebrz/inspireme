@@ -152,7 +152,7 @@ router.get(
               { problem: { contains: q, mode: 'insensitive' } },
             ],
           },
-          select: { id: true, title: true, category: true },
+          select: { id: true, title: true, categories: true },
           take: 5,
           orderBy: { createdAt: 'desc' },
         }),
@@ -208,7 +208,7 @@ router.get(
         ideas: ideas.map((i) => ({
           id: i.id,
           title: i.title,
-          category: i.category,
+          categories: i.categories,
         })),
         users: users
           .map((u) => {

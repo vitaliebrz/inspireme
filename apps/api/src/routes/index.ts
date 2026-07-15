@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import authRoutes from './auth.js';
 import feedRoutes from './feed.js';
+import categoriesRoutes from './categories.js';
 import searchRoutes from './search.js';
 import ideasRoutes from './ideas.js';
 import chatRoutes from './chat.js';
@@ -13,10 +14,12 @@ import notificationsRoutes from './notifications.js';
 import adminRoutes from './admin.js';
 import gdprRoutes from './gdpr.js';
 import groupsRoutes from './groups.js';
+import supportRoutes from './support.js';
 
 const router = Router();
 
 router.use('/auth', authRoutes);
+router.use('/categories', categoriesRoutes);
 router.use('/feed', feedRoutes);
 router.use('/search', searchRoutes);
 router.use('/ideas', ideasRoutes);
@@ -30,5 +33,6 @@ router.use('/notifications', notificationsRoutes);
 router.use('/admin', adminRoutes);
 router.use('/gdpr', gdprRoutes);
 router.use('/groups', groupsRoutes);
+router.use('/support', supportRoutes);
 
 export default router;

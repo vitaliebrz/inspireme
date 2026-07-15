@@ -1,11 +1,15 @@
 import {
   Plan,
-  IdeaCategory,
   IdeaVisibility,
   IdeaStatus,
+  NotificationType,
+  GiveawayStatus,
   Prisma,
 } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
+import { redis, REDIS_KEYS, REDIS_TTL } from '../lib/redis.js';
+import { deleteAsset } from '../lib/cloudinary.js';
+import { createNotification, sendIdeaPublishedEmail, sendIdeaFeedbackEmail } from './notifications.service.js';
 
 // ─────────────────────────────────────────────
 // CREARE IDEE
@@ -13,9 +17,10 @@ import { prisma } from '../lib/prisma.js';
 
 interface CreateIdeaInput {
   userId: string;
+  userEmail: string;
   userPlan: Plan;
   title: string;
-  category: IdeaCategory;
+  categories: string[];
   problem: string;
   solution: string;
   targetAudience?: string;
@@ -40,11 +45,11 @@ export async function createIdea(input: CreateIdeaInput) {
     .split(/\s+/)
     .filter(Boolean).length;
 
-  return prisma.idea.create({
+  const idea = await prisma.idea.create({
     data: {
       userId,
       title: input.title,
-      category: input.category,
+      categories: input.categories,
       problem: input.problem,
       solution: input.solution,
       targetAudience: input.targetAudience ?? null,
@@ -53,9 +58,24 @@ export async function createIdea(input: CreateIdeaInput) {
       status: IdeaStatus.PUBLICAT,
       planAtPost: userPlan,
       wordCount,
+      // Scor inițial: Pro +100 + recency completă (30). Jobul zilnic îl recalculează.
+      score: (userPlan === Plan.PRO ? 100 : 0) + 30,
     },
     select: { id: true },
   });
+
+  // Notificare + email confirmare publicare — non-blocking
+  createNotification({
+    userId,
+    type: NotificationType.IDEA_PUBLISHED,
+    title: 'Ideea ta a fost publicată! 🎉',
+    body: `„${input.title}" e acum vizibilă în feed.`,
+    data: { ideaId: idea.id },
+  }).catch(() => {});
+
+  sendIdeaPublishedEmail(input.userEmail, input.title, idea.id).catch(() => {});
+
+  return idea;
 }
 
 // ─────────────────────────────────────────────
@@ -105,9 +125,15 @@ export async function addIdeaPdf(input: AddIdeaPdfInput) {
   const idea = await prisma.idea.findUnique({ where: { id: input.ideaId }, select: { userId: true } });
   if (!idea || idea.userId !== input.userId) throw Object.assign(new Error('Nu ai drept să modifici această idee.'), { status: 403 });
 
-  const existing = await prisma.ideaPdf.count({ where: { ideaId: input.ideaId } });
-  if (existing >= 1) {
-    throw Object.assign(new Error('Poți atașa un singur PDF per idee.'), { status: 403 });
+  // Un singur PDF per idee: dacă există deja unul, îl ÎNLOCUIM (ștergem vechiul
+  // din DB + Cloudinary) în loc să respingem upload-ul.
+  const existing = await prisma.ideaPdf.findMany({
+    where: { ideaId: input.ideaId },
+    select: { id: true, publicId: true },
+  });
+  if (existing.length > 0) {
+    await prisma.ideaPdf.deleteMany({ where: { ideaId: input.ideaId } });
+    existing.forEach((p) => { if (p.publicId) deleteAsset(p.publicId, 'raw').catch(() => {}); });
   }
 
   await prisma.ideaPdf.create({
@@ -121,6 +147,18 @@ export async function addIdeaPdf(input: AddIdeaPdfInput) {
   });
 }
 
+export async function deleteIdeaPdf(ideaId: string, userId: string) {
+  // Verificăm proprietarul prin relația idea.userId
+  const pdfs = await prisma.ideaPdf.findMany({
+    where: { ideaId, idea: { userId } },
+    select: { id: true, publicId: true },
+  });
+  if (pdfs.length === 0) throw Object.assign(new Error('PDF-ul nu a fost găsit.'), { status: 404 });
+
+  await prisma.ideaPdf.deleteMany({ where: { id: { in: pdfs.map((p) => p.id) } } });
+  pdfs.forEach((p) => { if (p.publicId) deleteAsset(p.publicId, 'raw').catch(() => {}); });
+}
+
 // ─────────────────────────────────────────────
 // VIZUALIZARE IDEE
 // ─────────────────────────────────────────────
@@ -129,7 +167,7 @@ export async function getIdeaById(ideaId: string, viewerId: string) {
   const idea = await prisma.idea.findUnique({
     where: { id: ideaId },
     select: {
-      id: true, title: true, category: true, problem: true, solution: true,
+      id: true, title: true, categories: true, problem: true, solution: true,
       targetAudience: true, tags: true, visibility: true, status: true,
       planAtPost: true, viewCount: true, wordCount: true, createdAt: true, updatedAt: true,
       userId: true,
@@ -146,14 +184,22 @@ export async function getIdeaById(ideaId: string, viewerId: string) {
       images: { orderBy: { order: 'asc' }, select: { id: true, url: true, order: true } },
       pdfs: { select: { id: true, url: true, filename: true, size: true } },
       _count: { select: { feedbackList: true, connectionRequests: true } },
+      // Tot feedback-ul lăsat pe idee, vizibil oricui vede ideea (proprietar,
+      // alți mentori, elevi). Includem autorul pentru afișare; antreprenorul autor
+      // își recunoaște propriul feedback după antreprenorId (pentru editare).
       feedbackList: {
-        where: { antreprenorId: viewerId },
+        orderBy: { createdAt: 'desc' },
         select: {
-          id: true, ratingGeneral: true, ratingOriginalitate: true,
+          id: true, antreprenorId: true, ratingGeneral: true, ratingOriginalitate: true,
           ratingViabilitate: true, ratingPrezentare: true, ratingPotential: true,
           comment: true, interestedInCollab: true, createdAt: true,
+          antreprenor: {
+            select: {
+              id: true,
+              profileAntreprenor: { select: { firstName: true, lastName: true, company: true, avatarUrl: true } },
+            },
+          },
         },
-        take: 1,
       },
     },
   });
@@ -165,12 +211,20 @@ export async function getIdeaById(ideaId: string, viewerId: string) {
     throw Object.assign(new Error('Această idee este privată.'), { status: 403 });
   }
 
-  // Incrementăm view_count dacă nu e proprietarul
-  if (idea.userId !== viewerId) {
-    void prisma.idea.update({
-      where: { id: ideaId },
-      data: { viewCount: { increment: 1 } },
-    });
+  // Incrementăm view_count dacă nu e proprietarul + deduplicare Redis (1 view/oră per user)
+  const isOwner = idea.userId === viewerId;
+  let counted = false;
+  if (!isOwner) {
+    const viewKey = REDIS_KEYS.ideaView(viewerId, ideaId);
+    const alreadyViewed = await redis.get(viewKey).catch(() => null);
+    if (!alreadyViewed) {
+      await redis.set(viewKey, '1', { ex: REDIS_TTL.ideaView }).catch(() => null);
+      prisma.idea.update({
+        where: { id: ideaId },
+        data: { viewCount: { increment: 1 } },
+      }).catch((err) => console.error('[viewCount] increment failed:', err));
+      counted = true;
+    }
   }
 
   // Cerere de conectare existentă de la viewer
@@ -180,7 +234,11 @@ export async function getIdeaById(ideaId: string, viewerId: string) {
     orderBy: { createdAt: 'desc' },
   });
 
-  return { ...idea, connectionRequest };
+  return {
+    ...idea,
+    viewCount: counted ? idea.viewCount + 1 : idea.viewCount,
+    connectionRequest,
+  };
 }
 
 // ─────────────────────────────────────────────
@@ -191,7 +249,7 @@ interface UpdateIdeaInput {
   ideaId: string;
   userId: string;
   title?: string;
-  category?: IdeaCategory;
+  categories?: string[];
   problem?: string;
   solution?: string;
   targetAudience?: string;
@@ -210,7 +268,7 @@ export async function updateIdea(input: UpdateIdeaInput) {
 
   const updateData: Prisma.IdeaUpdateInput = {};
   if (input.title !== undefined) updateData.title = input.title;
-  if (input.category !== undefined) updateData.category = input.category;
+  if (input.categories !== undefined) updateData.categories = input.categories;
   if (input.problem !== undefined) updateData.problem = input.problem;
   if (input.solution !== undefined) updateData.solution = input.solution;
   if (input.targetAudience !== undefined) updateData.targetAudience = input.targetAudience;
@@ -246,12 +304,72 @@ export async function updateIdea(input: UpdateIdeaInput) {
 // ─────────────────────────────────────────────
 
 export async function deleteIdea(ideaId: string, userId: string) {
-  const idea = await prisma.idea.findUnique({ where: { id: ideaId }, select: { userId: true } });
+  const idea = await prisma.idea.findUnique({
+    where: { id: ideaId },
+    select: {
+      userId: true,
+      images: { select: { publicId: true } },
+      pdfs: { select: { publicId: true } },
+    },
+  });
   if (!idea) throw Object.assign(new Error('Idee negăsită.'), { status: 404 });
   if (idea.userId !== userId) throw Object.assign(new Error('Nu ai drept să ștergi această idee.'), { status: 403 });
 
-  // Ștergem fizic (Cascadă în schema Prisma va șterge imagini, PDF-uri, etc.)
+  // ─── Protecție „idee angajată" ───────────────────────────────────────────
+  // O idee care a produs valoare (conectare, colaborare, giveaway) NU poate fi
+  // ștearsă. Motive: (1) păstrează istoricul (câștigător giveaway, colaborări);
+  // (2) previne abuzul planului Gratuit — postezi o idee, te conectezi cu un
+  // antreprenor, ștergi ideea și postezi alta ca să ocolești limita de 1 idee.
+
+  // 1. Conectare acceptată prin această idee
+  const acceptedConnection = await prisma.connectionRequest.findFirst({
+    where: { ideaId, status: 'ACCEPTED' },
+    select: { id: true },
+  });
+  if (acceptedConnection) {
+    throw Object.assign(
+      new Error('Nu poți șterge o idee prin care te-ai conectat cu un antreprenor.'),
+      { status: 409 },
+    );
+  }
+
+  // 2. Colaborare pe această idee
+  const collaboration = await prisma.collaboration.findFirst({
+    where: { ideaId },
+    select: { id: true },
+  });
+  if (collaboration) {
+    throw Object.assign(
+      new Error('Nu poți șterge o idee care are o colaborare asociată.'),
+      { status: 409 },
+    );
+  }
+
+  // 3. Participare la giveaway (activ SAU finalizat; cele anulate nu blochează)
+  const participations = await prisma.giveawayParticipant.findMany({
+    where: { ideaId, giveaway: { status: { in: [GiveawayStatus.ACTIVE, GiveawayStatus.FINISHED] } } },
+    select: { giveaway: { select: { status: true } } },
+  });
+  if (participations.length > 0) {
+    const hasFinished = participations.some((p) => p.giveaway.status === GiveawayStatus.FINISHED);
+    throw Object.assign(
+      new Error(
+        hasFinished
+          ? 'Nu poți șterge o idee care a participat la un giveaway finalizat — istoricul giveaway-ului depinde de ea.'
+          : 'Retrage-ți participarea din giveaway înainte de a șterge această idee.',
+      ),
+      { status: 409 },
+    );
+  }
+
+  // Cascada Prisma șterge rândurile din DB; noi ștergem și fizic din Cloudinary
   await prisma.idea.delete({ where: { id: ideaId } });
+
+  const imagePublicIds = idea.images.map((i) => i.publicId).filter((p): p is string => Boolean(p));
+  const pdfPublicIds   = idea.pdfs.map((p) => p.publicId).filter((p): p is string => Boolean(p));
+
+  imagePublicIds.forEach((pid) => deleteAsset(pid, 'image').catch(() => {}));
+  pdfPublicIds.forEach((pid)   => deleteAsset(pid, 'raw').catch(() => {}));
 }
 
 // ─────────────────────────────────────────────
@@ -263,10 +381,120 @@ export async function getMyIdeas(userId: string) {
     where: { userId },
     orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
     select: {
-      id: true, title: true, category: true, status: true, visibility: true,
-      planAtPost: true, viewCount: true, createdAt: true,
-      images: { take: 1, orderBy: { order: 'asc' }, select: { url: true } },
+      id: true, title: true, categories: true, status: true, visibility: true,
+      planAtPost: true, viewCount: true, wordCount: true, createdAt: true,
+      images: { take: 1, orderBy: { order: 'asc' }, select: { id: true, url: true } },
+      pdfs: { take: 1, select: { id: true } },
       _count: { select: { feedbackList: true, connectionRequests: true } },
     },
   });
+}
+
+// ─────────────────────────────────────────────
+// FEEDBACK (antreprenor → idee)
+// ─────────────────────────────────────────────
+
+export async function submitFeedback(
+  ideaId: string,
+  antreprenorId: string,
+  ratingGeneral: number,
+  comment?: string,
+  interestedInCollab?: boolean,
+) {
+  const idea = await prisma.idea.findUnique({ where: { id: ideaId }, select: { id: true, userId: true, title: true } });
+  if (!idea) throw Object.assign(new Error('Ideea nu a fost găsită.'), { status: 404 });
+  if (idea.userId === antreprenorId) throw Object.assign(new Error('Nu poți da feedback propriei idei.'), { status: 403 });
+
+  const feedback = await prisma.feedback.upsert({
+    where: { antreprenorId_ideaId: { antreprenorId, ideaId } },
+    create: {
+      antreprenorId, ideaId,
+      ratingGeneral,
+      ratingOriginalitate: ratingGeneral,
+      ratingViabilitate: ratingGeneral,
+      ratingPrezentare: ratingGeneral,
+      ratingPotential: ratingGeneral,
+      comment: comment ?? null,
+      interestedInCollab: interestedInCollab ?? false,
+    },
+    update: {
+      ratingGeneral,
+      ratingOriginalitate: ratingGeneral,
+      ratingViabilitate: ratingGeneral,
+      ratingPrezentare: ratingGeneral,
+      ratingPotential: ratingGeneral,
+      comment: comment ?? null,
+      interestedInCollab: interestedInCollab ?? false,
+      updatedAt: new Date(),
+    },
+    select: { id: true, ratingGeneral: true, comment: true, interestedInCollab: true, createdAt: true, updatedAt: true },
+  });
+
+  // Notificăm proprietarul ideii doar la PRIMUL feedback (create), nu la editări
+  const isNewFeedback = feedback.createdAt.getTime() === feedback.updatedAt.getTime();
+  if (isNewFeedback) {
+    const [owner, antreprenor] = await Promise.all([
+      prisma.user.findUnique({ where: { id: idea.userId }, select: { email: true } }),
+      prisma.user.findUnique({
+        where: { id: antreprenorId },
+        select: { profileAntreprenor: { select: { firstName: true, lastName: true } } },
+      }),
+    ]);
+    const ap = antreprenor?.profileAntreprenor;
+    const fromName = ap ? `${ap.firstName} ${ap.lastName}`.trim() : 'Un antreprenor';
+
+    createNotification({
+      userId: idea.userId,
+      type: NotificationType.IDEA_FEEDBACK,
+      title: `${fromName} ți-a lăsat feedback`,
+      body: `Ai primit feedback pe ideea „${idea.title}".`,
+      data: { ideaId },
+    }).catch(() => {});
+
+    if (owner?.email) {
+      sendIdeaFeedbackEmail(owner.email, idea.title, ideaId, fromName).catch(() => {});
+    }
+  }
+
+  return feedback;
+}
+
+// ─────────────────────────────────────────────
+// JOB ZILNIC — reset stadiu idee la inactivitate (spec: 30 zile fără mesaje)
+// Idei în stadiul automat CONTACTAT ale căror conversații-origine sunt inactive
+// > 30 zile revin la PUBLICAT. Stadiile manuale (IN_COLABORARE/REALIZAT) NU se ating.
+// ─────────────────────────────────────────────
+
+export async function resetInactiveIdeaStatuses(): Promise<void> {
+  const threshold = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+  const ideas = await prisma.idea.findMany({
+    where: { status: IdeaStatus.CONTACTAT },
+    select: {
+      id: true, userId: true, title: true,
+      originConversations: { select: { lastMessageAt: true, createdAt: true } },
+    },
+  });
+
+  for (const idea of ideas) {
+    // Fără conversații legate nu putem confirma inactivitatea → nu resetăm (conservator)
+    if (idea.originConversations.length === 0) continue;
+
+    // Cea mai recentă activitate din conversațiile legate de idee
+    const lastActivity = idea.originConversations.reduce<Date | null>((max, c) => {
+      const t = c.lastMessageAt ?? c.createdAt;
+      return !max || t > max ? t : max;
+    }, null);
+
+    if (lastActivity && lastActivity < threshold) {
+      await prisma.idea.update({ where: { id: idea.id }, data: { status: IdeaStatus.PUBLICAT } });
+      createNotification({
+        userId: idea.userId,
+        type: NotificationType.IDEA_STATUS_RESET,
+        title: 'Stadiul ideii a revenit la Publicat',
+        body: `Conversațiile pentru „${idea.title}" par inactive. Stadiul ideii tale a revenit la Publicat.`,
+        data: { ideaId: idea.id },
+      }).catch(() => {});
+    }
+  }
 }

@@ -1,6 +1,5 @@
 import {
   Plan,
-  IdeaCategory,
   IdeaVisibility,
   EntrepreneurStatus,
   GiveawayStatus,
@@ -13,7 +12,7 @@ const PAGE_SIZE = 12;
 
 interface FeedIdeiOptions {
   userId: string;
-  category?: IdeaCategory;
+  category?: string;
   cursor?: string;
 }
 
@@ -22,16 +21,17 @@ interface FeedAntreprenoriOptions {
   cursor?: string;
 }
 
-function encodeCursor(parts: string[]): string {
-  return Buffer.from(parts.join('|')).toString('base64url');
-}
-
-function decodeCursorIdei(cursor: string) {
-  try {
-    const [planAtPost, createdAt, id] = Buffer.from(cursor, 'base64url').toString().split('|');
-    if (!planAtPost || !createdAt || !id) return null;
-    return { planAtPost: planAtPost as Plan, createdAt, id };
-  } catch { return null; }
+// Recalculează scorul persistat al TUTUROR ideilor — rulat de jobul zilnic.
+// Formula: REALIZAT → penalizare masivă (mereu la coadă); Pro +100; recency
+// (max 30, scade cu vârsta); engagement (view_count). Un singur UPDATE SQL, eficient.
+export async function recomputeIdeaScores(): Promise<void> {
+  await prisma.$executeRawUnsafe(`
+    UPDATE "ideas" SET "score" =
+      (CASE WHEN "status" = 'REALIZAT' THEN -10000 ELSE 0 END)
+      + (CASE WHEN "plan_at_post" = 'PRO' THEN 100 ELSE 0 END)
+      + GREATEST(0, 30 - EXTRACT(EPOCH FROM (now() - "created_at")) / 86400)
+      + "view_count" * 0.01
+  `);
 }
 
 // ─────────────────────────────────────────────
@@ -57,39 +57,27 @@ export async function getIdeasFeed(opts: FeedIdeiOptions) {
   });
   const blockedIds: string[] = blockedRows.map((r: { blockedId: string }) => r.blockedId);
 
-  const cur = cursor ? decodeCursorIdei(cursor) : null;
-
+  // Ordonare GLOBALĂ după scorul persistat (recalculat de jobul zilnic), cu
+  // paginare cursor Prisma stabilă pe id. Fără sortare în memorie → fără idei
+  // sărite/duplicate între pagini, iar „Pro first" e global, nu doar pe pagină.
   const where: Prisma.IdeaWhereInput = {
     visibility: IdeaVisibility.PUBLIC,
     user: { isDeleted: false, isSuspended: false, id: { notIn: blockedIds } },
     blockedContent: null,
-    ...(category ? { category } : {}),
-    ...(cur
-      ? {
-          OR: [
-            {
-              planAtPost: cur.planAtPost,
-              OR: [
-                { createdAt: { lt: new Date(cur.createdAt) } },
-                { createdAt: new Date(cur.createdAt), id: { lt: cur.id } },
-              ],
-            },
-            ...(cur.planAtPost === Plan.PRO ? [{ planAtPost: Plan.GRATUIT }] : []),
-          ],
-        }
-      : {}),
+    ...(category ? { categories: { has: category } } : {}),
   };
 
   const rows = await prisma.idea.findMany({
     where,
     take: PAGE_SIZE + 1,
-    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    orderBy: [{ score: 'desc' }, { id: 'desc' }],
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     select: {
-      id: true, title: true, category: true, problem: true,
+      id: true, title: true, categories: true, problem: true,
       viewCount: true, status: true, planAtPost: true, createdAt: true, tags: true,
       user: {
         select: {
-          plan: true,
+          id: true, plan: true,
           profileElev: { select: { firstName: true, lastName: true, avatarUrl: true, city: true } },
         },
       },
@@ -98,26 +86,10 @@ export async function getIdeasFeed(opts: FeedIdeiOptions) {
     },
   });
 
-  type IdeaRow = typeof rows[number];
+  const hasNextPage = rows.length > PAGE_SIZE;
+  const items = rows.slice(0, PAGE_SIZE);
 
-  const scored: Array<IdeaRow & { _score: number }> = rows.map((idea: IdeaRow) => {
-    const ageDays = (Date.now() - idea.createdAt.getTime()) / 86_400_000;
-    const score =
-      (idea.planAtPost === Plan.PRO ? 100 : 0) +
-      Math.max(0, 30 - ageDays) +
-      idea.viewCount * 0.01;
-    return { ...idea, _score: score };
-  });
-
-  scored.sort((a: { _score: number }, b: { _score: number }) => b._score - a._score);
-
-  const hasNextPage = scored.length > PAGE_SIZE;
-  const items = scored.slice(0, PAGE_SIZE).map(({ _score: _, ...rest }: IdeaRow & { _score: number }) => rest);
-
-  const last = items[items.length - 1];
-  const nextCursor = hasNextPage && last
-    ? encodeCursor([last.planAtPost, last.createdAt.toISOString(), last.id])
-    : null;
+  const nextCursor = hasNextPage && items.length > 0 ? items[items.length - 1]!.id : null;
 
   const result = { items, nextCursor, hasNextPage };
 
@@ -168,10 +140,14 @@ export async function getAntreprenoriFeed(opts: FeedAntreprenoriOptions) {
     profileAntreprenor: { isNot: null },
   };
 
+  // Ordonare/paginare în DB după lastActivity (recent = mai activ), cu cursor
+  // Prisma stabil pe id. Statusul dinamic (ACTIV/INACTIV/RETRAS) se calculează
+  // doar pentru afișare — nu se mai sortează în memorie (înainte cursorul era ignorat).
   const rows = await prisma.user.findMany({
     where,
     take: PAGE_SIZE + 1,
-    orderBy: [{ lastActivity: 'desc' }, { id: 'desc' }],
+    orderBy: [{ lastActivity: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }],
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     select: {
       id: true, plan: true, lastActivity: true, createdAt: true,
       profileAntreprenor: {
@@ -184,42 +160,17 @@ export async function getAntreprenoriFeed(opts: FeedAntreprenoriOptions) {
     },
   });
 
-  type UserRow = typeof rows[number];
+  const hasNextPage = rows.length > PAGE_SIZE;
+  const items = rows.slice(0, PAGE_SIZE).map((u) => {
+    const la = u.lastActivity;
+    const dynamicStatus: EntrepreneurStatus =
+      la && la >= d30 ? EntrepreneurStatus.ACTIV
+      : la && la >= d60 ? EntrepreneurStatus.INACTIV
+      : EntrepreneurStatus.RETRAS;
+    return { ...u, status: dynamicStatus };
+  });
 
-  type ScoredUser = UserRow & { dynamicStatus: EntrepreneurStatus; _score: number };
-
-  const scored: ScoredUser[] = rows
-    .filter((u: UserRow) => u.profileAntreprenor !== null)
-    .map((u: UserRow) => {
-      const la = u.lastActivity;
-      const dynamicStatus: EntrepreneurStatus =
-        la && la >= d30 ? EntrepreneurStatus.ACTIV
-        : la && la >= d60 ? EntrepreneurStatus.INACTIV
-        : EntrepreneurStatus.RETRAS;
-
-      const score =
-        (u.plan === Plan.PRO ? 50 : 0) +
-        (dynamicStatus === EntrepreneurStatus.ACTIV ? 100
-          : dynamicStatus === EntrepreneurStatus.INACTIV ? 30 : 0);
-
-      return { ...u, dynamicStatus, _score: score };
-    });
-
-  scored.sort((a: ScoredUser, b: ScoredUser) => b._score - a._score);
-
-  const hasNextPage = scored.length > PAGE_SIZE;
-  const items = scored.slice(0, PAGE_SIZE).map(
-    ({ _score: _, dynamicStatus, ...u }: ScoredUser) => ({ ...u, status: dynamicStatus }),
-  );
-
-  const last = items[items.length - 1];
-  const nextCursor = hasNextPage && last
-    ? encodeCursor([
-        last.status,
-        last.lastActivity?.toISOString() ?? 'null',
-        last.id,
-      ])
-    : null;
+  const nextCursor = hasNextPage && items.length > 0 ? items[items.length - 1]!.id : null;
 
   const result = { items, nextCursor, hasNextPage };
 

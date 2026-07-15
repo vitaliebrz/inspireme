@@ -1,18 +1,22 @@
 import { useState, FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { Eye, EyeOff, Loader2, CheckCircle, MessageCircleQuestion } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import Logo from '../../components/Logo';
+import SupportModal from '../../components/ui/SupportModal';
 
 export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const registered = (location.state as { registered?: boolean } | null)?.registered ?? false;
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [supportOpen, setSupportOpen] = useState(false);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -21,7 +25,6 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const user = await login(email, password);
-      // firstLogin → product tour (implementat la AUTH-06)
       navigate('/feed');
       void user;
     } catch (err: unknown) {
@@ -40,7 +43,6 @@ export default function LoginPage() {
         className="hidden lg:flex flex-col w-1/2 p-12"
         style={{ backgroundColor: 'var(--bg-2)' }}
       >
-        {/* Logo + tagline centrate vertical în panou */}
         <div className="flex-1 flex flex-col justify-center">
           <Logo height={90} className="mb-8" />
           <h2 className="text-4xl font-bold leading-tight mb-4" style={{ color: 'var(--text)' }}>
@@ -58,10 +60,21 @@ export default function LoginPage() {
       {/* Formular dreapta */}
       <div className="flex-1 flex items-center justify-center p-6">
         <div className="w-full max-w-sm">
-          {/* Logo centrat — vizibil doar pe mobile (pe desktop e în panoul stâng) */}
           <div className="lg:hidden flex justify-center mb-8">
             <Logo height={40} />
           </div>
+
+          {registered && (
+            <div
+              className="flex items-center gap-3 px-4 py-3 rounded-xl mb-6"
+              style={{ backgroundColor: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)' }}
+            >
+              <CheckCircle size={18} style={{ color: '#22c55e', shrink: 0 }} />
+              <p className="text-sm font-medium" style={{ color: '#22c55e' }}>
+                Cont creat cu succes! Intră cu datele tale.
+              </p>
+            </div>
+          )}
 
           <h1 className="text-2xl font-bold mb-1" style={{ color: 'var(--text)' }}>
             Bun revenit!
@@ -71,7 +84,6 @@ export default function LoginPage() {
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Email */}
             <div>
               <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text)' }}>
                 Email
@@ -82,18 +94,18 @@ export default function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="adresa@email.ro"
                 required
-                className="w-full px-4 py-2.5 rounded-xl text-sm outline-none transition-all"
+                className="w-full px-4 py-2.5 rounded-xl text-sm outline-none"
                 style={{
                   backgroundColor: 'var(--bg-3)',
                   border: '1px solid var(--border)',
                   color: 'var(--text)',
+                  transition: 'border-color 150ms ease-out',
                 }}
                 onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--orange)')}
                 onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
               />
             </div>
 
-            {/* Parolă */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-sm font-medium" style={{ color: 'var(--text)' }}>
@@ -114,11 +126,12 @@ export default function LoginPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   required
-                  className="w-full pl-4 pr-10 py-2.5 rounded-xl text-sm outline-none transition-all"
+                  className="w-full pl-4 pr-10 py-2.5 rounded-xl text-sm outline-none"
                   style={{
                     backgroundColor: 'var(--bg-3)',
                     border: '1px solid var(--border)',
                     color: 'var(--text)',
+                    transition: 'border-color 150ms ease-out',
                   }}
                   onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--orange)')}
                   onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
@@ -126,7 +139,7 @@ export default function LoginPage() {
                 <button
                   type="button"
                   onClick={() => setShowPass((v) => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer hover:opacity-70"
                   style={{ color: 'var(--text-2)' }}
                 >
                   {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -134,18 +147,19 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {/* Eroare */}
             {error && (
-              <p className="text-sm px-4 py-2.5 rounded-xl" style={{ backgroundColor: 'rgba(239,68,68,0.1)', color: '#ef4444' }}>
+              <p
+                className="text-sm px-4 py-2.5 rounded-xl"
+                style={{ backgroundColor: 'rgba(239,68,68,0.1)', color: '#ef4444' }}
+              >
                 {error}
               </p>
             )}
 
-            {/* Submit */}
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2.5 rounded-xl font-semibold text-sm transition-opacity disabled:opacity-70 flex items-center justify-center gap-2"
+              className="w-full py-2.5 rounded-xl font-semibold text-sm cursor-pointer transition-opacity hover:opacity-90 disabled:opacity-70 flex items-center justify-center gap-2"
               style={{ backgroundColor: 'var(--orange)', color: '#fff' }}
             >
               {loading && <Loader2 size={16} className="animate-spin" />}
@@ -153,7 +167,6 @@ export default function LoginPage() {
             </button>
           </form>
 
-          {/* Links */}
           <div className="mt-6 space-y-2 text-center">
             <p className="text-sm" style={{ color: 'var(--text-2)' }}>
               Ești elev?{' '}
@@ -168,8 +181,22 @@ export default function LoginPage() {
               </Link>
             </p>
           </div>
+
+          <div className="mt-8 pt-6" style={{ borderTop: '1px solid var(--border)' }}>
+            <button
+              type="button"
+              onClick={() => setSupportOpen(true)}
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium cursor-pointer hover:opacity-80 transition-opacity"
+              style={{ backgroundColor: 'var(--bg-3)', color: 'var(--text-2)', border: '1px solid var(--border)' }}
+            >
+              <MessageCircleQuestion size={15} />
+              Problemă cu contul? Contactează suportul
+            </button>
+          </div>
         </div>
       </div>
+
+      <SupportModal open={supportOpen} onClose={() => setSupportOpen(false)} />
     </div>
   );
 }

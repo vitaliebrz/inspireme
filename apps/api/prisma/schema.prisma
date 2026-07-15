@@ -34,17 +34,6 @@ enum IdeaVisibility {
   PRIVAT
 }
 
-enum IdeaCategory {
-  ECO
-  TECH
-  ARTA
-  EDUCATIE
-  SANATATE
-  SOCIAL
-  FOOD
-  FINANTE
-}
-
 enum ConnectionRequestStatus {
   PENDING
   ACCEPTED
@@ -55,6 +44,7 @@ enum MessageType {
   TEXT
   PDF
   IMAGE
+  EVENT
 }
 
 enum GiveawayStatus {
@@ -79,6 +69,7 @@ enum NotificationType {
   CONNECTION_ACCEPTED
   MESSAGE_NEW
   IDEA_FEEDBACK
+  IDEA_PUBLISHED
   GIVEAWAY_NEW
   GIVEAWAY_WON
   GIVEAWAY_RESULT
@@ -89,6 +80,7 @@ enum NotificationType {
   ACCOUNT_WARNING
   SYSTEM
   GROUP_MESSAGE
+  SUPPORT_MESSAGE
 }
 
 enum InvestmentStatus {
@@ -159,6 +151,9 @@ model User {
   groupsCreated            IdeaGroup[]           @relation("GroupsCreated")
   groupMemberships         IdeaGroupMember[]
   groupMessagesSent        GroupMessage[]
+  supportTickets           SupportTicket[]
+  supportMessages          SupportMessage[]
+  categoriesCreated        Category[]            @relation("CategoriesCreated")
 
   @@index([email])
   @@index([role])
@@ -220,7 +215,7 @@ model Idea {
   id             String         @id @default(uuid())
   userId         String         @map("user_id")
   title          String
-  category       IdeaCategory
+  categories     String[]
   problem        String
   solution       String
   targetAudience String?        @map("target_audience")
@@ -230,6 +225,7 @@ model Idea {
   planAtPost     Plan           @map("plan_at_post")
   viewCount      Int            @default(0) @map("view_count")
   wordCount      Int            @default(0) @map("word_count")
+  score          Float          @default(0) @map("score")
   lastMessageAt  DateTime?      @map("last_message_at")
   createdAt      DateTime       @default(now()) @map("created_at")
   updatedAt      DateTime       @updatedAt @map("updated_at")
@@ -244,13 +240,15 @@ model Idea {
   investmentHistory    InvestmentHistory[]
   reports              Report[]              @relation("IdeaReports")
   blockedContent       BlockedContent?
+  originConversations  Conversation[]        @relation("ConvOriginIdea")
+  contextMessages      Message[]             @relation("MessageContextIdea")
 
   @@index([userId])
-  @@index([category])
   @@index([status])
   @@index([visibility])
   @@index([planAtPost, createdAt])
   @@index([createdAt])
+  @@index([score])
   @@map("ideas")
 }
 
@@ -281,6 +279,19 @@ model IdeaPdf {
 
   @@index([ideaId])
   @@map("idea_pdfs")
+}
+
+model Category {
+  id              String   @id @default(uuid())
+  name            String   @unique
+  iconName        String?  @map("icon_name")
+  order           Int      @default(0)
+  createdByUserId String?  @map("created_by_user_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  createdByUser User? @relation("CategoriesCreated", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@map("categories")
 }
 
 // ─────────────────────────────────────────────
@@ -318,12 +329,14 @@ model Conversation {
   participantAId      String    @map("participant_a_id")
   participantBId      String    @map("participant_b_id")
   connectionRequestId String    @unique @map("connection_request_id")
+  originIdeaId        String?   @map("origin_idea_id")
   createdAt           DateTime  @default(now()) @map("created_at")
   lastMessageAt       DateTime? @map("last_message_at")
 
   participantA      User              @relation("ConversationsAsA", fields: [participantAId], references: [id], onDelete: Cascade)
   participantB      User              @relation("ConversationsAsB", fields: [participantBId], references: [id], onDelete: Cascade)
   connectionRequest ConnectionRequest @relation(fields: [connectionRequestId], references: [id])
+  originIdea        Idea?             @relation("ConvOriginIdea", fields: [originIdeaId], references: [id], onDelete: SetNull)
   messages          Message[]
   reports           Report[]          @relation("ConversationReports")
 
@@ -344,10 +357,15 @@ model Message {
   fileSize       Int?        @map("file_size")
   readAt         DateTime?   @map("read_at")
   isAnonymized   Boolean     @default(false) @map("is_anonymized")
+  replyToId      String?     @map("reply_to_id")
+  ideaId         String?     @map("idea_id")
   createdAt      DateTime    @default(now()) @map("created_at")
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender       User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  replyTo      Message?     @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies      Message[]    @relation("MessageReplies")
+  idea         Idea?        @relation("MessageContextIdea", fields: [ideaId], references: [id], onDelete: SetNull)
 
   @@index([conversationId, createdAt])
   @@index([senderId])
@@ -673,6 +691,7 @@ model DataExportRequest {
 model IdeaGroup {
   id            String    @id @default(uuid())
   name          String
+  avatarUrl     String?   @map("avatar_url")
   createdById   String    @map("created_by_id")
   createdAt     DateTime  @default(now()) @map("created_at")
   lastMessageAt DateTime? @map("last_message_at")
@@ -708,12 +727,52 @@ model GroupMessage {
   content   String?
   type      MessageType @default(TEXT)
   fileUrl   String?     @map("file_url")
+  replyToId String?     @map("reply_to_id")
   createdAt DateTime    @default(now()) @map("created_at")
 
-  group  IdeaGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  sender User      @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  group   IdeaGroup      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  sender  User           @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  replyTo GroupMessage?  @relation("GroupMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies GroupMessage[] @relation("GroupMessageReplies")
 
   @@index([groupId, createdAt])
   @@index([senderId])
   @@map("group_messages")
+}
+
+// ─────────────────────────────────────────────
+// SUPPORT
+// ─────────────────────────────────────────────
+
+model SupportTicket {
+  id         String    @id @default(uuid())
+  name       String
+  email      String
+  message    String?
+  userId     String?   @unique @map("user_id")
+  status     String    @default("OPEN")
+  resolvedAt DateTime? @map("resolved_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user     User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  messages SupportMessage[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("support_tickets")
+}
+
+model SupportMessage {
+  id        String   @id @default(uuid())
+  ticketId  String   @map("ticket_id")
+  senderId  String?  @map("sender_id")
+  isAdmin   Boolean  @default(false) @map("is_admin")
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  sender User?         @relation(fields: [senderId], references: [id], onDelete: SetNull)
+
+  @@index([ticketId, createdAt])
+  @@map("support_messages")
 }

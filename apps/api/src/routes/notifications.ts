@@ -1,10 +1,11 @@
 import { Router, Request, Response } from 'express';
-import { param, query } from 'express-validator';
+import { param, query, body } from 'express-validator';
 import { authenticate } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { generalLimiter } from '../middleware/rateLimiter.js';
 import {
   getNotifications, getUnreadCount, markAsRead, markAllAsRead,
+  markReadByConversation, markReadByGroup, markReadByTicket,
 } from '../services/notifications.service.js';
 
 const router = Router();
@@ -59,5 +60,43 @@ router.patch('/read-all', async (req: Request, res: Response) => {
     res.json(result);
   } catch (err) { handleError(err, res); }
 });
+
+// PATCH /notifications/read-conversation — marcare citite per conversație 1-1 sau grup
+router.patch(
+  '/read-conversation',
+  [
+    body('conversationId').optional().isUUID(),
+    body('groupId').optional().isUUID(),
+  ],
+  validate,
+  async (req: Request, res: Response) => {
+    try {
+      const { conversationId, groupId } = req.body as { conversationId?: string; groupId?: string };
+      if (groupId) {
+        const result = await markReadByGroup(req.user!.sub, groupId);
+        res.json(result);
+      } else if (conversationId) {
+        const result = await markReadByConversation(req.user!.sub, conversationId);
+        res.json(result);
+      } else {
+        res.status(400).json({ error: 'conversationId sau groupId obligatoriu.' });
+      }
+    } catch (err) { handleError(err, res); }
+  },
+);
+
+// PATCH /notifications/read-support — marcare citite per ticket suport
+router.patch(
+  '/read-support',
+  [body('ticketId').isUUID()],
+  validate,
+  async (req: Request, res: Response) => {
+    try {
+      const { ticketId } = req.body as { ticketId: string };
+      const result = await markReadByTicket(req.user!.sub, ticketId);
+      res.json(result);
+    } catch (err) { handleError(err, res); }
+  },
+);
 
 export default router;
