@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { Trophy, Users, Calendar, Crown, ArrowLeft, Loader2, CheckCircle } from 'lucide-react';
+import { Trophy, Users, Calendar, Crown, ArrowLeft, Loader2, CheckCircle, MessageSquare } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
 
 function pad(n: number) { return String(n).padStart(2, '0'); }
@@ -45,6 +45,7 @@ interface GiveawayDetail {
     id: string;
     profileElev: { firstName: string; lastName: string; avatarUrl: string | null } | null;
   } | null;
+  winnerIdea: { id: string; title: string } | null;
   investmentConfirmedByAntreprenor: boolean;
   investmentConfirmedByElev: boolean;
   investmentConfirmedAt: string | null;
@@ -74,6 +75,7 @@ export default function GiveawayDetailPage() {
   const [joiningIdeaId, setJoiningIdeaId] = useState<string | null>(null);
   const [leaving, setLeaving] = useState(false);
   const [confirmingInvestment, setConfirmingInvestment] = useState(false);
+  const [contactingWinner, setContactingWinner] = useState(false);
   const [leaveModalOpen, setLeaveModalOpen] = useState(false);
   const [now, setNow] = useState(() => new Date());
 
@@ -122,6 +124,27 @@ export default function GiveawayDetailPage() {
     } finally {
       setLeaving(false);
       setLeaveModalOpen(false);
+    }
+  };
+
+  const handleContactWinner = async () => {
+    if (!giveaway) return;
+    setContactingWinner(true);
+    try {
+      // Backend: deschide conversația existentă (cu badge-ul ideii câștigătoare)
+      // sau trimite o cerere de conectare cu ideea câștigătoare.
+      const { data } = await api.post<{ conversationId: string | null; requestSent: boolean }>(
+        `/giveaways/${giveaway.id}/contact-winner`,
+      );
+      if (data.conversationId) {
+        navigate(`/chat/${data.conversationId}`);
+      } else {
+        toast('Cerere de conectare trimisă câștigătorului.', 'success');
+      }
+    } catch (err) {
+      toast((err as ApiError).response?.data?.error ?? 'Nu am putut contacta câștigătorul.', 'error');
+    } finally {
+      setContactingWinner(false);
     }
   };
 
@@ -328,13 +351,36 @@ export default function GiveawayDetailPage() {
                     {initials(winnerName)}
                   </div>
                 )}
-                <div>
-                  <p className="font-bold text-base leading-tight" style={{ color: 'var(--text)' }}>
+                <div className="min-w-0">
+                  <p className="font-bold text-base leading-tight truncate" style={{ color: 'var(--text)' }}>
                     {winnerName}
                   </p>
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-2)' }}>Elev câștigător</p>
+                  {giveaway.winnerIdea ? (
+                    <Link
+                      to={`/idea/${giveaway.winnerIdea.id}`}
+                      className="text-xs mt-0.5 block truncate hover:underline"
+                      style={{ color: 'var(--orange)' }}
+                    >
+                      Idee: {giveaway.winnerIdea.title}
+                    </Link>
+                  ) : (
+                    <p className="text-xs mt-0.5" style={{ color: 'var(--text-2)' }}>Elev câștigător</p>
+                  )}
                 </div>
               </div>
+
+              {/* Antreprenorul creator poate contacta câștigătorul */}
+              {user?.id === giveaway.antreprenor.id && (
+                <button
+                  onClick={() => void handleContactWinner()}
+                  disabled={contactingWinner}
+                  className="w-full mt-3 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-60 hover:opacity-90 transition-opacity"
+                  style={{ backgroundColor: 'var(--orange)', color: '#fff' }}
+                >
+                  {contactingWinner ? <Loader2 size={14} className="animate-spin" /> : <MessageSquare size={14} />}
+                  Contactează elevul
+                </button>
+              )}
             </div>
           );
         })()}

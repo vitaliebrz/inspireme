@@ -1,7 +1,12 @@
 import crypto from 'crypto';
 import { Plan, GiveawayStatus, NotificationType } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
-import { createNotification, sendGiveawayJoinEmail, sendGiveawayLeaveEmail, sendGiveawayWinnerEmail } from './notifications.service.js';
+import {
+  createNotification, sendGiveawayJoinEmail, sendGiveawayLeaveEmail,
+  sendGiveawayWinnerEmail, sendGiveawayWinnerAntreprenorEmail,
+  sendGiveawayInvestmentConfirmedEmail,
+} from './notifications.service.js';
+import { createConnectionRequest, openIdeaInConversation } from './chat.service.js';
 
 // ─────────────────────────────────────────────
 // CREARE GIVEAWAY (doar antreprenori Pro)
@@ -151,11 +156,18 @@ export async function getGiveawayById(id: string, viewerId: string) {
 
   // Câștigător — query separat (winner nu e relație în schemă)
   let winner: { id: string; profileElev: { firstName: string; lastName: string; avatarUrl: string | null } | null } | null = null;
+  let winnerIdea: { id: string; title: string } | null = null;
   if (giveaway.winnerId) {
     winner = await prisma.user.findUnique({
       where: { id: giveaway.winnerId },
       select: { id: true, profileElev: { select: { firstName: true, lastName: true, avatarUrl: true } } },
     });
+    // Ideea cu care a participat câștigătorul (dacă mai există)
+    const wp = await prisma.giveawayParticipant.findFirst({
+      where: { giveawayId: id, elevId: giveaway.winnerId },
+      select: { idea: { select: { id: true, title: true } } },
+    });
+    winnerIdea = wp?.idea ?? null;
   }
 
   // Participarea viewerului curent
@@ -164,7 +176,7 @@ export async function getGiveawayById(id: string, viewerId: string) {
     select: { id: true, joinedAt: true, idea: { select: { id: true, title: true } } },
   });
 
-  return { ...giveaway, winner, myParticipation: myParticipation ?? null };
+  return { ...giveaway, winner, winnerIdea, myParticipation: myParticipation ?? null };
 }
 
 // ─────────────────────────────────────────────
@@ -277,7 +289,7 @@ export async function leaveGiveaway(giveawayId: string, elevId: string) {
 export async function selectWinner(giveawayId: string, antreprenorId: string) {
   const giveaway = await prisma.giveaway.findUnique({
     where: { id: giveawayId },
-    select: { antreprenorId: true, status: true, endDate: true, winnerId: true },
+    select: { title: true, antreprenorId: true, status: true, endDate: true, winnerId: true },
   });
   if (!giveaway) throw Object.assign(new Error('Giveaway-ul nu a fost găsit.'), { status: 404 });
   if (giveaway.antreprenorId !== antreprenorId) {
@@ -292,7 +304,7 @@ export async function selectWinner(giveawayId: string, antreprenorId: string) {
 
   const participants = await prisma.giveawayParticipant.findMany({
     where: { giveawayId },
-    select: { elevId: true },
+    select: { elevId: true, idea: { select: { title: true } } },
   });
   if (participants.length === 0) {
     throw Object.assign(new Error('Nu există participanți pentru acest giveaway.'), { status: 409 });
@@ -300,17 +312,57 @@ export async function selectWinner(giveawayId: string, antreprenorId: string) {
 
   // Selecție CRIPTOGRAFIC SIGURĂ — niciodată pe client
   const winnerIndex = crypto.randomInt(0, participants.length);
-  const winnerId = participants[winnerIndex]!.elevId;
+  const winningParticipant = participants[winnerIndex]!;
+  const winnerId = winningParticipant.elevId;
+  const ideaTitle = winningParticipant.idea.title;
 
   await prisma.giveaway.update({
     where: { id: giveawayId },
     data: { status: GiveawayStatus.FINISHED, winnerId },
   });
 
-  const winner = await prisma.user.findUnique({
-    where: { id: winnerId },
-    select: { id: true, profileElev: { select: { firstName: true, lastName: true, avatarUrl: true } } },
-  });
+  const [winner, antreprenor] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: winnerId },
+      select: { id: true, email: true, profileElev: { select: { firstName: true, lastName: true, avatarUrl: true } } },
+    }),
+    prisma.user.findUnique({
+      where: { id: antreprenorId },
+      select: { email: true, profileAntreprenor: { select: { firstName: true, lastName: true } } },
+    }),
+  ]);
+
+  const winnerName = winner?.profileElev ? `${winner.profileElev.firstName} ${winner.profileElev.lastName}`.trim() : 'Câștigător';
+  const antreprenorName = antreprenor?.profileAntreprenor
+    ? `${antreprenor.profileAntreprenor.firstName} ${antreprenor.profileAntreprenor.lastName}`.trim()
+    : 'Antreprenorul';
+
+  // Notificări in-app pentru ambele părți — non-blocking
+  createNotification({
+    userId: winnerId,
+    type: NotificationType.GIVEAWAY_WON,
+    title: '🏆 Ai câștigat un giveaway!',
+    body: `Felicitări! Ai câștigat giveaway-ul „${giveaway.title}".`,
+    data: { giveawayId },
+  }).catch(() => {});
+
+  createNotification({
+    userId: antreprenorId,
+    type: NotificationType.GIVEAWAY_RESULT,
+    title: 'Câștigător ales — confirmă investiția',
+    body: `${winnerName} a câștigat giveaway-ul „${giveaway.title}" cu ideea „${ideaTitle}". Contactează-l pentru a investi.`,
+    data: { giveawayId },
+  }).catch(() => {});
+
+  // Email pentru câștigător — non-blocking
+  if (winner?.email) {
+    sendGiveawayWinnerEmail(winner.email, winnerName, giveaway.title, antreprenorName).catch(() => {});
+  }
+
+  // Email pentru antreprenor — non-blocking, cu invitație de a investi în ideea câștigătoare
+  if (antreprenor?.email) {
+    sendGiveawayWinnerAntreprenorEmail(antreprenor.email, antreprenorName, winnerName, giveaway.title, ideaTitle, giveawayId).catch(() => {});
+  }
 
   return { id: giveawayId, status: GiveawayStatus.FINISHED, winnerId, winner };
 }
@@ -331,11 +383,58 @@ export async function getConfirmationStatus(giveawayId: string) {
   });
 }
 
+// Antreprenorul creator contactează câștigătorul: deschide conversația existentă
+// (adăugând badge-ul EVENT cu ideea câștigătoare) sau trimite o cerere de conectare
+// cu ideea câștigătoare (badge-ul apare la acceptare). Funcționează și dacă ideea
+// a devenit REALIZAT.
+export async function contactGiveawayWinner(giveawayId: string, userId: string, userPlan: Plan) {
+  const giveaway = await prisma.giveaway.findUnique({
+    where: { id: giveawayId },
+    select: { antreprenorId: true, status: true, winnerId: true },
+  });
+  if (!giveaway) throw Object.assign(new Error('Giveaway-ul nu a fost găsit.'), { status: 404 });
+  if (giveaway.antreprenorId !== userId) {
+    throw Object.assign(new Error('Doar creatorul giveaway-ului poate contacta câștigătorul.'), { status: 403 });
+  }
+  if (giveaway.status !== GiveawayStatus.FINISHED || !giveaway.winnerId) {
+    throw Object.assign(new Error('Giveaway-ul nu are câștigător ales.'), { status: 409 });
+  }
+  const winnerId = giveaway.winnerId;
+
+  // Ideea câștigătoare — pentru badge-ul de context (EVENT) în chat
+  const wp = await prisma.giveawayParticipant.findFirst({
+    where: { giveawayId, elevId: winnerId },
+    select: { ideaId: true },
+  });
+  const ideaId = wp?.ideaId;
+
+  // Conversație existentă între antreprenor și câștigător?
+  const conv = await prisma.conversation.findFirst({
+    where: {
+      OR: [
+        { participantAId: userId, participantBId: winnerId },
+        { participantAId: winnerId, participantBId: userId },
+      ],
+    },
+    select: { id: true },
+  });
+
+  if (conv) {
+    // Adăugăm badge-ul EVENT cu ideea câștigătoare (idempotent) și deschidem chat-ul
+    if (ideaId) await openIdeaInConversation(conv.id, userId, ideaId).catch(() => {});
+    return { conversationId: conv.id, requestSent: false };
+  }
+
+  // Fără conversație → cerere de conectare cu ideea câștigătoare (allowRealizat=true)
+  await createConnectionRequest(userId, userPlan, winnerId, ideaId, true);
+  return { conversationId: null, requestSent: true };
+}
+
 export async function confirmInvestment(giveawayId: string, userId: string, userRole: string) {
   const giveaway = await prisma.giveaway.findUnique({
     where: { id: giveawayId },
     select: {
-      antreprenorId: true, status: true, winnerId: true,
+      antreprenorId: true, status: true, winnerId: true, title: true,
       investmentConfirmedByAntreprenor: true,
       investmentConfirmedByElev: true,
     },
@@ -368,19 +467,31 @@ export async function confirmInvestment(giveawayId: string, userId: string, user
   const antreprenorConfirmed = isAntreprenorOwner ? true : giveaway.investmentConfirmedByAntreprenor;
   const elevConfirmed = isWinner ? true : giveaway.investmentConfirmedByElev;
 
+  // Tranziția „ambele confirmate" (nu era deja complet confirmat înainte de acest apel)
+  // — ca notificările/email-urile să se trimită O SINGURĂ DATĂ, nu la fiecare re-confirmare.
+  const justFullyConfirmed =
+    antreprenorConfirmed && elevConfirmed &&
+    !(giveaway.investmentConfirmedByAntreprenor && giveaway.investmentConfirmedByElev);
+
   if (antreprenorConfirmed && elevConfirmed) {
     updateData.investmentConfirmedAt = new Date();
   }
 
   await prisma.giveaway.update({ where: { id: giveawayId }, data: updateData });
 
-  // Înregistrare investiție — doar la confirmare completă (ambele părți)
-  if (antreprenorConfirmed && elevConfirmed) {
+  // Înregistrare investiție + notificări — doar la PRIMA confirmare completă
+  if (justFullyConfirmed) {
     const winnerParticipant = await prisma.giveawayParticipant.findFirst({
       where: { giveawayId, elevId: giveaway.winnerId },
       select: { ideaId: true },
     });
     if (winnerParticipant) {
+      // Ideea câștigătoare devine REALIZAT — s-a investit în ea (badge 🏆 public)
+      await prisma.idea.updateMany({
+        where: { id: winnerParticipant.ideaId },
+        data: { status: 'REALIZAT' },
+      });
+
       // Creăm înregistrarea de investiție o singură dată (la confirmare completă)
       const alreadyExists = await prisma.investmentHistory.findFirst({
         where: { antreprenorId: giveaway.antreprenorId, ideaId: winnerParticipant.ideaId, investmentType: 'GIVEAWAY' },
@@ -399,7 +510,22 @@ export async function confirmInvestment(giveawayId: string, userId: string, user
       }
     }
 
-    // Notificări confirmare finalizată — non-blocking
+    // Destinatari: câștigător, antreprenor creator, admini
+    const [winnerU, antreprenorU, admins] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: giveaway.winnerId },
+        select: { email: true, profileElev: { select: { firstName: true, lastName: true } } },
+      }),
+      prisma.user.findUnique({
+        where: { id: giveaway.antreprenorId },
+        select: { email: true, profileAntreprenor: { select: { firstName: true, lastName: true } } },
+      }),
+      prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true, email: true } }),
+    ]);
+    const wNm = winnerU?.profileElev ? `${winnerU.profileElev.firstName} ${winnerU.profileElev.lastName}`.trim() : 'Câștigătorul';
+    const aNm = antreprenorU?.profileAntreprenor ? `${antreprenorU.profileAntreprenor.firstName} ${antreprenorU.profileAntreprenor.lastName}`.trim() : 'Antreprenorul';
+
+    // Notificări in-app confirmare finalizată — non-blocking
     createNotification({
       userId: giveaway.antreprenorId,
       type: NotificationType.GIVEAWAY_RESULT,
@@ -415,6 +541,24 @@ export async function confirmInvestment(giveawayId: string, userId: string, user
       body: 'Antreprenorul a confirmat și el investiția. Colaborarea este oficializată!',
       data: { giveawayId },
     }).catch(() => {});
+
+    // Notificare pentru admini
+    for (const admin of admins) {
+      createNotification({
+        userId: admin.id,
+        type: NotificationType.GIVEAWAY_RESULT,
+        title: 'Investiție giveaway confirmată ✅',
+        body: `${aNm} și ${wNm} au confirmat investiția pentru „${giveaway.title}".`,
+        data: { giveawayId },
+      }).catch(() => {});
+    }
+
+    // Email dublat pentru toți destinatarii (câștigător, antreprenor, admini)
+    const emails = [winnerU?.email, antreprenorU?.email, ...admins.map((a) => a.email)]
+      .filter((e): e is string => Boolean(e));
+    for (const email of emails) {
+      sendGiveawayInvestmentConfirmedEmail(email, giveaway.title, aNm, wNm, giveawayId).catch(() => {});
+    }
   }
 
   return {
@@ -442,7 +586,7 @@ export async function autoSelectExpiredWinners(): Promise<void> {
     try {
       const participants = await prisma.giveawayParticipant.findMany({
         where: { giveawayId: giveaway.id },
-        select: { elevId: true },
+        select: { elevId: true, idea: { select: { title: true } } },
       });
 
       if (participants.length === 0) {
@@ -463,7 +607,9 @@ export async function autoSelectExpiredWinners(): Promise<void> {
 
       // Selecție CRIPTOGRAFIC SIGURĂ — niciodată pe client
       const winnerIndex = crypto.randomInt(0, participants.length);
-      const winnerId = participants[winnerIndex]!.elevId;
+      const winningParticipant = participants[winnerIndex]!;
+      const winnerId = winningParticipant.elevId;
+      const ideaTitle = winningParticipant.idea.title;
 
       await prisma.giveaway.update({
         where: { id: giveaway.id },
@@ -481,24 +627,29 @@ export async function autoSelectExpiredWinners(): Promise<void> {
       createNotification({
         userId: giveaway.antreprenorId,
         type: NotificationType.GIVEAWAY_RESULT,
-        title: 'Câștigătorul a fost ales automat',
-        body: `Giveaway-ul „${giveaway.title}" s-a încheiat. Câștigătorul a fost selectat automat.`,
+        title: 'Câștigător ales — confirmă investiția',
+        body: `Giveaway-ul „${giveaway.title}" s-a încheiat. Câștigătorul a fost selectat automat cu ideea „${ideaTitle}". Contactează-l pentru a investi.`,
         data: { giveawayId: giveaway.id },
       }).catch(() => {});
 
-      // Email pentru câștigător — non-blocking
+      // Email pentru câștigător + antreprenor — non-blocking
       Promise.all([
         prisma.user.findUnique({ where: { id: winnerId }, select: { email: true, profileElev: { select: { firstName: true, lastName: true } } } }),
-        prisma.user.findUnique({ where: { id: giveaway.antreprenorId }, select: { profileAntreprenor: { select: { firstName: true, lastName: true } } } }),
+        prisma.user.findUnique({ where: { id: giveaway.antreprenorId }, select: { email: true, profileAntreprenor: { select: { firstName: true, lastName: true } } } }),
       ]).then(([winnerUser, antreprenorUser]) => {
-        if (!winnerUser?.email) return;
-        const winnerName = winnerUser.profileElev
+        const winnerName = winnerUser?.profileElev
           ? `${winnerUser.profileElev.firstName} ${winnerUser.profileElev.lastName}`.trim()
           : 'Câștigător';
         const antreprenorName = antreprenorUser?.profileAntreprenor
           ? `${antreprenorUser.profileAntreprenor.firstName} ${antreprenorUser.profileAntreprenor.lastName}`.trim()
           : 'Antreprenorul';
-        return sendGiveawayWinnerEmail(winnerUser.email, winnerName, giveaway.title, antreprenorName);
+
+        if (winnerUser?.email) {
+          sendGiveawayWinnerEmail(winnerUser.email, winnerName, giveaway.title, antreprenorName).catch(() => {});
+        }
+        if (antreprenorUser?.email) {
+          sendGiveawayWinnerAntreprenorEmail(antreprenorUser.email, antreprenorName, winnerName, giveaway.title, ideaTitle, giveaway.id).catch(() => {});
+        }
       }).catch(() => {});
 
       console.log(`[Scheduler] Giveaway ${giveaway.id}: câștigător ales din ${participants.length} participanți`);

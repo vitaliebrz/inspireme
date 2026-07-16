@@ -7,7 +7,7 @@ import { generalLimiter } from '../middleware/rateLimiter.js';
 import {
   createGiveaway, getGiveaways, getGiveawayById,
   joinGiveaway, leaveGiveaway, selectWinner,
-  confirmInvestment, getMyGiveaways,
+  confirmInvestment, contactGiveawayWinner, getMyGiveaways,
 } from '../services/giveaway.service.js';
 
 const router = Router();
@@ -161,6 +161,20 @@ router.post(
   async (req: Request, res: Response) => {
     try {
       const result = await confirmInvestment(req.params['id'] as string, req.user!.sub, req.user!.role);
+      res.json(result);
+    } catch (err) { handleError(err, res); }
+  },
+);
+
+// POST /giveaways/:id/contact-winner — antreprenorul contactează câștigătorul
+router.post(
+  '/:id/contact-winner',
+  [param('id').isUUID()],
+  validate,
+  async (req: Request, res: Response) => {
+    try {
+      const plan = req.user!.role === 'ADMIN' ? Plan.PRO : (req.user!.plan as Plan);
+      const result = await contactGiveawayWinner(req.params['id'] as string, req.user!.sub, plan);
       res.json(result);
     } catch (err) { handleError(err, res); }
   },

@@ -271,6 +271,56 @@ export async function sendGiveawayWinnerEmail(toEmail: string, winnerName: strin
   );
 }
 
+export async function sendGiveawayWinnerAntreprenorEmail(
+  toEmail: string,
+  antreprenorName: string,
+  winnerName: string,
+  giveawayTitle: string,
+  ideaTitle: string,
+  giveawayId: string,
+) {
+  await sendEmail(
+    toEmail,
+    `Câștigătorul giveaway-ului "${giveawayTitle}" a fost ales 🏆`,
+    `
+      <div style="font-family: sans-serif; max-width: 500px; margin: 0 auto;">
+        <h2 style="color: #2d3748;">Câștigător ales pentru giveaway-ul tău</h2>
+        <p>Salut, ${antreprenorName}!</p>
+        <p><strong>${winnerName}</strong> a fost ales câștigătorul giveaway-ului <strong>"${giveawayTitle}"</strong> cu ideea <strong>"${ideaTitle}"</strong>.</p>
+        <p>Următorul pas este să contactezi câștigătorul și să confirmi investiția promisă în această idee.</p>
+        <a href="${APP_URL}/giveaways/${giveawayId}" style="display: inline-block; background: #f6a623; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold; margin-top: 16px;">
+          Confirmă investiția
+        </a>
+      </div>
+    `,
+  );
+}
+
+// Investiție giveaway confirmată de ambele părți — trimis câștigătorului,
+// antreprenorului creator și adminilor.
+export async function sendGiveawayInvestmentConfirmedEmail(
+  toEmail: string,
+  giveawayTitle: string,
+  antreprenorName: string,
+  winnerName: string,
+  giveawayId: string,
+) {
+  await sendEmail(
+    toEmail,
+    `Investiție confirmată — „${giveawayTitle}" ✅`,
+    `
+      <div style="font-family: sans-serif; max-width: 500px; margin: 0 auto;">
+        <h2 style="color: #2d3748;">Investiție confirmată de ambele părți ✅</h2>
+        <p><strong>${antreprenorName}</strong> și <strong>${winnerName}</strong> au confirmat investiția pentru giveaway-ul <strong>"${giveawayTitle}"</strong>.</p>
+        <p>Colaborarea este acum oficializată.</p>
+        <a href="${APP_URL}/giveaways/${giveawayId}" style="display: inline-block; background: #f6a623; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold; margin-top: 16px;">
+          Vezi giveaway-ul
+        </a>
+      </div>
+    `,
+  );
+}
+
 export async function sendAccountWarningEmail(toEmail: string, daysUntilDelete: number) {
   const subject = daysUntilDelete > 30
     ? 'Contul tău InspireMe va fi șters în 35 de zile'

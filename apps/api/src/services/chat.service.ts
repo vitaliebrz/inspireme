@@ -19,6 +19,9 @@ export async function createConnectionRequest(
   fromUserPlan: Plan,
   toUserId: string,
   ideaId?: string,
+  // Pentru contexte legitime (ex. antreprenorul contactează câștigătorul unui
+  // giveaway) permitem cererea chiar dacă ideea a devenit REALIZAT.
+  allowRealizat = false,
 ) {
   // Verificăm că toUserId nu a blocat pe fromUser
   const blocked = await prisma.blockedUser.findFirst({
@@ -36,7 +39,7 @@ export async function createConnectionRequest(
     if (!idea || idea.userId !== toUserId) {
       throw Object.assign(new Error('Ideea nu există sau nu aparține acestui utilizator.'), { status: 404 });
     }
-    if (idea.status === 'REALIZAT') {
+    if (idea.status === 'REALIZAT' && !allowRealizat) {
       throw Object.assign(new Error('Această idee este marcată ca realizată și nu mai acceptă cereri de conectare.'), { status: 409 });
     }
     ideaTitle = idea.title;
