@@ -40,9 +40,11 @@ interface Props {
   onViewProfile?: () => void;
   onContact?: () => void;
   isConnected?: boolean;
+  /** Poziția în listă — folosită doar pentru intrarea eșalonată (stagger) la mount. */
+  index?: number;
 }
 
-export default function IdeaCard({ idea, onClick, onViewProfile, onContact, isConnected }: Props) {
+export default function IdeaCard({ idea, onClick, onViewProfile, onContact, isConnected, index }: Props) {
   const profile = idea.user.profileElev;
   const initials = profile
     ? `${profile.firstName[0] ?? ''}${profile.lastName[0] ?? ''}`.toUpperCase()
@@ -56,20 +58,25 @@ export default function IdeaCard({ idea, onClick, onViewProfile, onContact, isCo
   return (
     <article
       onClick={onClick}
-      className="idea-card flex flex-col rounded-2xl overflow-hidden cursor-pointer"
+      className={index !== undefined ? 'idea-card stagger-item flex flex-col rounded-2xl overflow-hidden cursor-pointer' : 'idea-card flex flex-col rounded-2xl overflow-hidden cursor-pointer'}
       style={{
+        ['--i' as string]: index,
         backgroundColor: 'var(--bg-2)',
         border: '1px solid var(--border)',
         boxShadow: isPro ? '0 0 0 1.5px rgba(246,166,35,0.3)' : undefined,
-        transition: 'transform 150ms var(--ease-out)',
+        transition: 'transform 150ms var(--ease-out), box-shadow 150ms var(--ease-out)',
         opacity: isRealizat ? 0.62 : 1,
         filter: isRealizat ? 'grayscale(0.45)' : undefined,
       }}
       onMouseEnter={canHover ? (e) => {
         (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)';
+        (e.currentTarget as HTMLElement).style.boxShadow = isPro
+          ? '0 0 0 1.5px rgba(246,166,35,0.3), 0 12px 24px rgba(0,0,0,0.16)'
+          : '0 12px 24px rgba(0,0,0,0.16)';
       } : undefined}
       onMouseLeave={canHover ? (e) => {
         (e.currentTarget as HTMLElement).style.transform = '';
+        (e.currentTarget as HTMLElement).style.boxShadow = isPro ? '0 0 0 1.5px rgba(246,166,35,0.3)' : '';
       } : undefined}
     >
       {/* Imagine cover */}

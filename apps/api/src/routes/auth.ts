@@ -20,9 +20,18 @@ import {
   resetPassword,
   confirmParentalConsent,
   rejectParentalConsent,
+  getCurrentUser,
 } from '../services/auth.service.js';
+import { setRefreshCookie, clearRefreshCookie, REFRESH_COOKIE_NAME } from '../lib/authCookie.js';
 
 const router = Router();
+
+// Trimite rezultatul auth: refresh token în cookie httpOnly (nu în body → imun XSS),
+// access token + user în body (access se ține în memorie pe client).
+function sendAuth(res: Response, result: { accessToken: string; refreshToken: string; user: unknown }, status = 200) {
+  setRefreshCookie(res, result.refreshToken);
+  res.status(status).json({ accessToken: result.accessToken, user: result.user });
+}
 
 // Express 5 tipizează params ca string | string[] — helper pentru siguranță
 const p = (req: Request, name: string): string => {
@@ -60,7 +69,7 @@ router.post(
         return;
       }
 
-      res.status(201).json(result);
+      sendAuth(res, result, 201);
     } catch (err) {
       next(err);
     }
@@ -87,7 +96,7 @@ router.post(
         bioMentor: req.body.bioMentor as string | undefined,
       });
 
-      res.status(201).json(result);
+      sendAuth(res, result, 201);
     } catch (err) {
       next(err);
     }
@@ -106,26 +115,30 @@ router.post(
         req.body.email as string,
         req.body.password as string,
       );
-      res.json(result);
+      sendAuth(res, result);
     } catch (err) {
       next(err);
     }
   },
 );
 
-// POST /api/v1/auth/refresh
+// POST /api/v1/auth/refresh — refresh token din cookie httpOnly (nu din body)
 router.post(
   '/refresh',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const token = req.body.refreshToken as string | undefined;
+      const token = (req.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE_NAME];
       if (!token) {
-        res.status(400).json({ error: 'Refresh token lipsă.' });
+        res.status(401).json({ error: 'Refresh token lipsă.' });
         return;
       }
       const tokens = await refreshTokens(token);
-      res.json(tokens);
+      // Rotăm cookie-ul cu noul refresh token; access token în body
+      setRefreshCookie(res, tokens.refreshToken);
+      res.json({ accessToken: tokens.accessToken });
     } catch (err) {
+      // La refresh invalid/expirat, curățăm cookie-ul ca să nu rămână agățat
+      clearRefreshCookie(res);
       next(err);
     }
   },
@@ -138,6 +151,7 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       await logout(req.user!.sub);
+      clearRefreshCookie(res);
       res.json({ message: 'Delogat cu succes.' });
     } catch (err) {
       next(err);
@@ -222,14 +236,15 @@ router.post(
   },
 );
 
-// GET /api/v1/auth/me — user curent (util pentru frontend)
+// GET /api/v1/auth/me — user curent, citit fresh din DB (nu din payload-ul JWT,
+// care poate rămâne cu plan/rol vechi până la următorul refresh de token)
 router.get(
   '/me',
   authenticate,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { sub, email, role, plan } = req.user!;
-      res.json({ id: sub, email, role, plan });
+      const user = await getCurrentUser(req.user!.sub);
+      res.json(user);
     } catch (err) {
       next(err);
     }

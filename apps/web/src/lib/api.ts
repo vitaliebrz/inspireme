@@ -7,44 +7,60 @@ const BASE_URL = import.meta.env['VITE_API_URL'] ?? (
     : DEFAULT_API_URL
 );
 
+// ─────────────────────────────────────────────
+// ACCESS TOKEN — ținut DOAR în memorie (nu în localStorage) → imun la furt prin XSS.
+// Refresh token-ul stă într-un cookie httpOnly (invizibil pentru JavaScript), trimis
+// automat de browser pe /auth/refresh (withCredentials).
+// ─────────────────────────────────────────────
+let accessToken: string | null = null;
+export function setAccessToken(token: string | null): void { accessToken = token; }
+export function getAccessToken(): string | null { return accessToken; }
+
+// withCredentials → trimite cookie-ul httpOnly de refresh către API
 export const api = axios.create({
   baseURL: BASE_URL,
   headers: { 'Content-Type': 'application/json' },
+  withCredentials: true,
 });
 
-// Atașează access token la fiecare request
-// Dacă datele sunt FormData, ștergem Content-Type ca browser-ul să seteze boundary-ul corect
+// Atașează access token (din memorie) la fiecare request.
+// Dacă datele sunt FormData, ștergem Content-Type ca browser-ul să seteze boundary-ul corect.
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('accessToken');
-  if (token) config.headers['Authorization'] = `Bearer ${token}`;
+  if (accessToken) config.headers['Authorization'] = `Bearer ${accessToken}`;
   if (config.data instanceof FormData) {
     delete config.headers['Content-Type'];
   }
   return config;
 });
 
-// Dacă primim 401 → încearcă refresh, dacă eșuează → logout
+// Refresh cu single-flight: mai multe 401-uri simultane declanșează UN singur refresh
+// (altfel rotația refresh token-ului s-ar invalida reciproc).
+let refreshPromise: Promise<string> | null = null;
+export function refreshAccessToken(): Promise<string> {
+  if (!refreshPromise) {
+    refreshPromise = axios
+      .post<{ accessToken: string }>(`${BASE_URL}/auth/refresh`, {}, { withCredentials: true })
+      .then(({ data }) => { setAccessToken(data.accessToken); return data.accessToken; })
+      .finally(() => { refreshPromise = null; });
+  }
+  return refreshPromise;
+}
+
+// La 401 → încearcă refresh (prin cookie), reia cererea; dacă eșuează → logout.
 api.interceptors.response.use(
   (res) => res,
   async (error) => {
     const original = error.config;
-    if (error.response?.status === 401 && !original._retry) {
+    if (error.response?.status === 401 && original && !original._retry) {
       original._retry = true;
-      const refreshToken = localStorage.getItem('refreshToken');
-      // Fără refresh token = utilizator neautentificat pe pagină publică — nu redirectăm
-      if (!refreshToken) return Promise.reject(error);
       try {
-        const { data } = await axios.post(`${BASE_URL}/auth/refresh`, { refreshToken });
-        localStorage.setItem('accessToken', data.accessToken);
-        localStorage.setItem('refreshToken', data.refreshToken);
-
-        original.headers['Authorization'] = `Bearer ${data.accessToken}`;
+        const token = await refreshAccessToken();
+        original.headers['Authorization'] = `Bearer ${token}`;
         return api(original);
       } catch {
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
+        setAccessToken(null);
         localStorage.removeItem('user');
-        window.location.href = '/login';
+        if (window.location.pathname !== '/login') window.location.href = '/login';
       }
     }
     return Promise.reject(error);

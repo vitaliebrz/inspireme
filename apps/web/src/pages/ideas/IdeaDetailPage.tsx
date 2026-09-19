@@ -6,7 +6,7 @@ import {
   Eye, Star, MessageSquare, Crown, Trophy,
   FileText, Pencil, Trash2, Lock, Globe, Loader2,
   ChevronLeft, ChevronRight, X, Lightbulb, Zap, Users,
-  Download,
+  Download, Flag, Search,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
@@ -93,7 +93,7 @@ function ImageLightbox({
 
   return createPortal(
     <div
-      className="fixed inset-0 flex items-center justify-center"
+      className="fixed inset-0 flex items-center justify-center modal-backdrop-anim"
       style={{ zIndex: 1000, backgroundColor: 'rgba(0,0,0,0.92)', backdropFilter: 'blur(8px)' }}
       onClick={onClose}
       role="dialog"
@@ -347,6 +347,167 @@ function StatRow({ icon, value, label }: { icon: React.ReactNode; value: number;
 }
 
 
+interface SimilarIdeaOption {
+  id: string;
+  title: string;
+  authorName: string;
+}
+
+function ReportDuplicateModal({
+  ideaId, onClose, onSubmitted,
+}: {
+  ideaId: string;
+  onClose: () => void;
+  onSubmitted: () => void;
+}) {
+  const [reason, setReason] = useState('');
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<SimilarIdeaOption[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [selected, setSelected] = useState<SimilarIdeaOption | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  // Debounce 300ms pe search
+  useEffect(() => {
+    if (selected || query.trim().length < 3) { setResults([]); return; }
+    setSearching(true);
+    const timer = setTimeout(() => {
+      api.get<{ results: SimilarIdeaOption[] }>('/ideas/search-similar', { params: { q: query.trim(), excludeId: ideaId } })
+        .then(({ data }) => setResults(data.results))
+        .catch(() => setResults([]))
+        .finally(() => setSearching(false));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query, selected, ideaId]);
+
+  const canSubmit = reason.trim().length >= 10 && !!selected && !submitting;
+
+  const handleSubmit = async () => {
+    if (!canSubmit) return;
+    setSubmitting(true);
+    setError('');
+    try {
+      await api.post('/chat/report', {
+        contentType: 'IDEA',
+        contentId: ideaId,
+        reason: reason.trim(),
+        relatedIdeaId: selected!.id,
+      });
+      onSubmitted();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Eroare la trimiterea raportului.';
+      setError(msg);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop-anim"
+      style={{ backgroundColor: 'rgba(0,0,0,0.6)' }}
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md rounded-2xl p-5 max-h-[85vh] overflow-y-auto modal-content-anim"
+        style={{ backgroundColor: 'var(--bg-2)', border: '1px solid var(--border)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-base font-bold flex items-center gap-2" style={{ color: 'var(--text)' }}>
+            <Flag size={16} style={{ color: '#ef4444' }} /> Raportează ca duplicat
+          </h3>
+          <button onClick={onClose} className="p-1 rounded-lg" style={{ color: 'var(--text-2)' }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--text)' }}>Ideea originală *</label>
+        <p className="text-xs mb-2" style={{ color: 'var(--text-2)' }}>Caută ideea pe care crezi că a copiat-o.</p>
+
+        {selected ? (
+          <div
+            className="flex items-center justify-between gap-2 p-3 rounded-xl mb-3"
+            style={{ backgroundColor: 'var(--bg-3)', border: '1px solid var(--orange)' }}
+          >
+            <div className="min-w-0">
+              <p className="text-sm font-semibold truncate" style={{ color: 'var(--text)' }}>{selected.title}</p>
+              <p className="text-xs" style={{ color: 'var(--text-2)' }}>de {selected.authorName}</p>
+            </div>
+            <button onClick={() => setSelected(null)} className="shrink-0 p-1" style={{ color: 'var(--text-2)' }}>
+              <X size={14} />
+            </button>
+          </div>
+        ) : (
+          <div className="relative mb-3">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--text-2)' }} />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Caută după titlu..."
+              className="w-full pl-9 pr-3 py-2.5 rounded-xl text-sm outline-none"
+              style={{ backgroundColor: 'var(--bg-3)', border: '1px solid var(--border)', color: 'var(--text)' }}
+            />
+            {(searching || results.length > 0) && (
+              <div className="mt-2 space-y-1.5 max-h-40 overflow-y-auto">
+                {searching && <p className="text-xs px-1" style={{ color: 'var(--text-2)' }}>Se caută...</p>}
+                {!searching && results.map((r) => (
+                  <button
+                    type="button"
+                    key={r.id}
+                    onClick={() => { setSelected(r); setQuery(''); setResults([]); }}
+                    className="w-full text-left p-2.5 rounded-lg hover:brightness-110"
+                    style={{ backgroundColor: 'var(--bg-3)', border: '1px solid var(--border)' }}
+                  >
+                    <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{r.title}</p>
+                    <p className="text-xs" style={{ color: 'var(--text-2)' }}>de {r.authorName}</p>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--text)' }}>Motiv *</label>
+        <textarea
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          rows={3}
+          placeholder="Explică de ce crezi că e un duplicat (min. 10 caractere)..."
+          className="w-full px-3 py-2.5 rounded-xl text-sm outline-none resize-none mb-1"
+          style={{ backgroundColor: 'var(--bg-3)', border: '1px solid var(--border)', color: 'var(--text)' }}
+        />
+        <p className="text-xs mb-3" style={{ color: 'var(--text-2)' }}>{reason.trim().length}/10 caractere minim</p>
+
+        {error && (
+          <p className="text-xs mb-3 px-3 py-2 rounded-lg" style={{ backgroundColor: 'rgba(239,68,68,0.1)', color: '#ef4444' }}>{error}</p>
+        )}
+
+        <div className="flex gap-2">
+          <button
+            onClick={onClose}
+            className="flex-1 py-2.5 rounded-xl text-sm font-semibold"
+            style={{ backgroundColor: 'var(--bg-3)', border: '1px solid var(--border)', color: 'var(--text-2)' }}
+          >
+            Anulează
+          </button>
+          <button
+            onClick={() => void handleSubmit()}
+            disabled={!canSubmit}
+            className="flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-40"
+            style={{ backgroundColor: '#ef4444', color: '#fff' }}
+          >
+            {submitting ? <Loader2 size={14} className="animate-spin" /> : <Flag size={14} />}
+            Trimite raport
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function IdeaDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
@@ -368,6 +529,7 @@ export default function IdeaDetailPage() {
   const [feedbackInterested, setFeedbackInterested] = useState(false);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [feedbackSuccess, setFeedbackSuccess] = useState(false);
+  const [reportModalOpen, setReportModalOpen] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -536,6 +698,17 @@ export default function IdeaDetailPage() {
         onConfirm={() => void handleDelete()}
         onCancel={() => setDeleteModalOpen(false)}
       />
+
+      {reportModalOpen && (
+        <ReportDuplicateModal
+          ideaId={idea.id}
+          onClose={() => setReportModalOpen(false)}
+          onSubmitted={() => {
+            setReportModalOpen(false);
+            toast('Raportul a fost trimis. Un admin îl va analiza.', 'success');
+          }}
+        />
+      )}
 
       {/* Breadcrumb */}
       <nav className="flex items-center gap-1.5 text-sm mb-5 min-w-0">
@@ -913,6 +1086,19 @@ export default function IdeaDetailPage() {
               <StatRow icon={<Star size={15} />} value={idea._count.feedbackList} label="feedback-uri" />
             </div>
           </div>
+
+          {/* Raportare duplicat — vizibil oricui, cu excepția proprietarului */}
+          {!isOwner && (
+            <button
+              onClick={() => setReportModalOpen(true)}
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-2xl text-xs font-medium"
+              style={{ backgroundColor: 'var(--bg-2)', border: '1px solid var(--border)', color: 'var(--text-2)' }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = '#ef4444')}
+              onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-2)')}
+            >
+              <Flag size={13} /> Raportează ca duplicat
+            </button>
+          )}
 
           {/* Card acțiuni — doar proprietarul (editează / șterge) */}
           {isOwner && (

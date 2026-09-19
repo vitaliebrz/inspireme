@@ -100,6 +100,36 @@ export async function getUnreadCount(userId: string) {
   return prisma.notification.count({ where: { userId, readAt: null } });
 }
 
+// Count-uri exacte pentru badge-uri (nelimitate — lista /notifications e plafonată la 50,
+// deci numerele NU se pot calcula din ea). Agregăm toate necititele (rânduri mici: type+data).
+export async function getNotificationCounts(userId: string) {
+  const unread = await prisma.notification.findMany({
+    where: { userId, readAt: null },
+    select: { type: true, data: true },
+  });
+
+  let messages = 0;
+  const byConversation: Record<string, number> = {};
+  const byGroup: Record<string, number> = {};
+  const bySupport: Record<string, number> = {};
+
+  for (const n of unread) {
+    const d = (n.data ?? {}) as Record<string, string>;
+    if (n.type === NotificationType.MESSAGE_NEW) {
+      messages++;
+      if (d['conversationId']) byConversation[d['conversationId']] = (byConversation[d['conversationId']] ?? 0) + 1;
+    } else if (n.type === NotificationType.GROUP_MESSAGE) {
+      messages++;
+      if (d['groupId']) byGroup[d['groupId']] = (byGroup[d['groupId']] ?? 0) + 1;
+    } else if (n.type === NotificationType.SUPPORT_MESSAGE) {
+      messages++;
+      if (d['ticketId']) bySupport[d['ticketId']] = (bySupport[d['ticketId']] ?? 0) + 1;
+    }
+  }
+
+  return { total: unread.length, messages, byConversation, byGroup, bySupport };
+}
+
 // ─────────────────────────────────────────────
 // MARCARE CA CITITE
 // ─────────────────────────────────────────────
@@ -355,6 +385,90 @@ export async function sendPaymentFailedEmail(toEmail: string) {
         <a href="${APP_URL}/subscriptions" style="display: inline-block; background: #f6a623; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold; margin-top: 16px;">
           Actualizează plata
         </a>
+      </div>
+    `,
+  );
+}
+
+export async function sendProActivatedEmail(toEmail: string, role: 'ELEV' | 'ANTREPRENOR') {
+  const benefits = role === 'ELEV'
+    ? ['Idei nelimitate', '10 imagini per idee', 'Mesaje nelimitate în chat', 'Prioritate în feed (scor +100)']
+    : ['30 cereri de conectare/zi', 'Lansare giveaway-uri', 'Prioritate în feed antreprenori', 'Acces statistici avansate'];
+
+  await sendEmail(
+    toEmail,
+    'Planul Pro a fost activat! 🎉',
+    `
+      <div style="font-family:sans-serif;max-width:560px;margin:0 auto;background:#0f1117;color:#f0f2f8;border-radius:16px;overflow:hidden;">
+        <div style="background:#f6a623;padding:32px 40px;text-align:center;">
+          <h1 style="margin:0;font-size:28px;color:#fff;font-weight:800;">InspireMe Pro</h1>
+        </div>
+        <div style="padding:40px;">
+          <h2 style="margin:0 0 12px;font-size:22px;color:#f0f2f8;">Plata a fost procesată cu succes! 🎉</h2>
+          <p style="color:#8892a4;line-height:1.6;margin:0 0 20px;">
+            Abonamentul tău <strong style="color:#f0f2f8">Pro</strong> este activ chiar acum. Ai deblocat:
+          </p>
+          <ul style="color:#8892a4;line-height:1.9;margin:0 0 24px;padding-left:20px;">
+            ${benefits.map((b) => `<li>${b}</li>`).join('')}
+          </ul>
+          <a href="${APP_URL}/subscriptions"
+            style="display:inline-block;background:#f6a623;color:#fff;padding:14px 32px;border-radius:12px;text-decoration:none;font-weight:700;font-size:15px;">
+            Vezi abonamentul →
+          </a>
+          <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:32px 0;" />
+          <p style="color:#8892a4;font-size:13px;margin:0;">
+            Poți anula oricând din aplicație — anularea e imediată, nu la finalul perioadei plătite.
+          </p>
+        </div>
+      </div>
+    `,
+  );
+}
+
+export async function sendDowngradeEmail(
+  toEmail: string,
+  info: { reason: string; ideasMadePrivate: string[]; giveawaysWithdrawn: string[] },
+) {
+  const { reason, ideasMadePrivate, giveawaysWithdrawn } = info;
+
+  await sendEmail(
+    toEmail,
+    'Ai trecut la planul Gratuit',
+    `
+      <div style="font-family:sans-serif;max-width:560px;margin:0 auto;background:#0f1117;color:#f0f2f8;border-radius:16px;overflow:hidden;">
+        <div style="background:#2d3748;padding:32px 40px;text-align:center;">
+          <h1 style="margin:0;font-size:24px;color:#fff;font-weight:800;">InspireMe</h1>
+        </div>
+        <div style="padding:40px;">
+          <h2 style="margin:0 0 12px;font-size:20px;color:#f0f2f8;">Contul tău e acum pe planul Gratuit</h2>
+          <p style="color:#8892a4;line-height:1.6;margin:0 0 20px;">${reason}</p>
+
+          ${ideasMadePrivate.length > 0 ? `
+            <p style="color:#f0f2f8;font-weight:600;margin:0 0 8px;">
+              ${ideasMadePrivate.length === 1 ? 'Această idee a devenit privată' : 'Aceste idei au devenit private'} (planul Gratuit permite o singură idee publică):
+            </p>
+            <ul style="color:#8892a4;line-height:1.9;margin:0 0 20px;padding-left:20px;">
+              ${ideasMadePrivate.map((t) => `<li>${t}</li>`).join('')}
+            </ul>
+            <p style="color:#8892a4;line-height:1.6;margin:0 0 20px;">
+              Ideile nu au fost șterse — sunt doar private și nu pot fi făcute publice din nou până nu activezi Pro.
+            </p>
+          ` : ''}
+
+          ${giveawaysWithdrawn.length > 0 ? `
+            <p style="color:#f0f2f8;font-weight:600;margin:0 0 8px;">
+              ${giveawaysWithdrawn.length === 1 ? 'Participarea la acest giveaway a fost retrasă' : 'Participările la aceste giveaway-uri au fost retrase'} (idei private nu pot concura):
+            </p>
+            <ul style="color:#8892a4;line-height:1.9;margin:0 0 24px;padding-left:20px;">
+              ${giveawaysWithdrawn.map((t) => `<li>${t}</li>`).join('')}
+            </ul>
+          ` : ''}
+
+          <a href="${APP_URL}/subscriptions"
+            style="display:inline-block;background:#f6a623;color:#fff;padding:14px 32px;border-radius:12px;text-decoration:none;font-weight:700;font-size:15px;">
+            Reactivează Pro →
+          </a>
+        </div>
       </div>
     `,
   );

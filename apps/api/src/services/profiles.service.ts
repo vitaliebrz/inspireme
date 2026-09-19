@@ -2,6 +2,37 @@ import { Role } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 
 // ─────────────────────────────────────────────
+// ANALITICĂ — vizualizări pe ultimele 7 zile (idei ale userului)
+// ─────────────────────────────────────────────
+
+const RO_DAYS = ['Du', 'Lu', 'Ma', 'Mi', 'Jo', 'Vi', 'Sâ'];
+
+export async function getMyAnalytics(userId: string) {
+  const rows = await prisma.$queryRawUnsafe<{ day: string; count: number }[]>(
+    `SELECT to_char(date_trunc('day', iv.created_at), 'YYYY-MM-DD') AS day, COUNT(*)::int AS count
+       FROM idea_views iv
+       JOIN ideas i ON i.id = iv.idea_id
+      WHERE i.user_id = $1 AND iv.created_at >= NOW() - INTERVAL '7 days'
+      GROUP BY 1`,
+    userId,
+  );
+  const byDay = new Map(rows.map((r) => [r.day, Number(r.count)]));
+
+  // Construim cele 7 zile (inclusiv cele cu 0 vizualizări), cele mai vechi → cele noi.
+  // Totul în UTC ca să se potrivească cu date_trunc din SQL (altfel fus orar → 0).
+  const weeklyViews: { day: string; count: number }[] = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setUTCHours(0, 0, 0, 0);
+    d.setUTCDate(d.getUTCDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    weeklyViews.push({ day: RO_DAYS[d.getUTCDay()]!, count: byDay.get(key) ?? 0 });
+  }
+
+  return { weeklyViews, recentActivity: [] as unknown[] };
+}
+
+// ─────────────────────────────────────────────
 // PROFIL PROPRIU — date complete
 // ─────────────────────────────────────────────
 

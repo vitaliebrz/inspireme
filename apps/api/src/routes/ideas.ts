@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { body, param } from 'express-validator';
+import { body, param, query } from 'express-validator';
 import { IdeaVisibility, IdeaStatus, Plan } from '@prisma/client';
 import { authenticate } from '../middleware/auth.js';
 import { requireElev } from '../middleware/auth.js';
@@ -10,6 +10,7 @@ import { cloudinary, deleteAsset } from '../lib/cloudinary.js';
 import {
   createIdea, getIdeaById, updateIdea, deleteIdea,
   addIdeaImages, addIdeaPdf, deleteIdeaPdf, getMyIdeas, submitFeedback,
+  findSimilarIdeas,
 } from '../services/ideas.service.js';
 
 const router = Router();
@@ -38,6 +39,27 @@ router.get('/me', requireElev, async (req: Request, res: Response) => {
 });
 
 // ─────────────────────────────────────────────
+// GET /ideas/search-similar?q=... — căutare titlu (pg_trgm), folosită și la
+// selectarea ideii originale în dialogul de raportare duplicat
+// ─────────────────────────────────────────────
+router.get(
+  '/search-similar',
+  [
+    query('q').isString().trim().isLength({ min: 3, max: 150 }),
+    query('excludeId').optional().isString().trim().notEmpty(),
+  ],
+  validate,
+  async (req: Request, res: Response) => {
+    try {
+      const q = req.query['q'] as string;
+      const excludeId = req.query['excludeId'] as string | undefined;
+      const results = await findSimilarIdeas(q, excludeId);
+      res.json({ results });
+    } catch (err) { handleError(err, res); }
+  },
+);
+
+// ─────────────────────────────────────────────
 // POST /ideas — creare idee (elev only)
 // ─────────────────────────────────────────────
 router.post(
@@ -53,14 +75,26 @@ router.post(
     body('targetAudience').optional().isString().trim().isLength({ max: 500 }),
     body('tags').optional().isArray({ max: 5 }),
     body('visibility').optional().isIn(Object.values(IdeaVisibility)),
+    body('ignoreSimilarWarning').optional().isBoolean(),
   ],
   validate,
   async (req: Request, res: Response) => {
     try {
-      const { title, categories, problem, solution, targetAudience, tags, visibility } = req.body as {
+      const { title, categories, problem, solution, targetAudience, tags, visibility, ignoreSimilarWarning } = req.body as {
         title: string; categories: string[]; problem: string; solution: string;
-        targetAudience?: string; tags?: string[]; visibility?: IdeaVisibility;
+        targetAudience?: string; tags?: string[]; visibility?: IdeaVisibility; ignoreSimilarWarning?: boolean;
       };
+
+      // Avertisment soft (nu blocant) — dacă există idei publice cu titlu similar
+      // și elevul nu a confirmat explicit că vrea să publice oricum.
+      if (!ignoreSimilarWarning) {
+        const similarIdeas = await findSimilarIdeas(title);
+        if (similarIdeas.length > 0) {
+          res.json({ needsConfirmation: true, similarIdeas });
+          return;
+        }
+      }
+
       const idea = await createIdea({
         userId: req.user!.sub,
         userEmail: req.user!.email,

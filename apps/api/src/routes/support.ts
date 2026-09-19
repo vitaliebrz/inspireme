@@ -7,7 +7,7 @@ import {
   prismaCreateAnonymousTicket,
   getOrCreateUserTicket, getUserTicketWithMessages, sendUserMessage,
   getAdminTickets, getAdminTicketMessages, sendAdminMessage,
-  resolveTicket, reopenTicket,
+  resolveTicket, reopenTicket, startTicketForUser,
   getPublicTicket, sendAnonymousReply,
 } from '../services/support.service.js';
 
@@ -125,6 +125,19 @@ router.get('/admin', async (_req: Request, res: Response) => {
     res.json({ tickets });
   } catch (err) { handleError(err, res); }
 });
+
+// POST /support/admin/start/:userId — adminul inițiază conversația cu un utilizator
+router.post(
+  '/admin/start/:userId',
+  [param('userId').isUUID()],
+  validate,
+  async (req: Request, res: Response) => {
+    try {
+      const result = await startTicketForUser(req.params['userId'] as string);
+      res.status(201).json(result);
+    } catch (err) { handleError(err, res); }
+  },
+);
 
 // GET /support/admin/:id/messages — mesajele unei conversații
 router.get(

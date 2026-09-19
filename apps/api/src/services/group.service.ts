@@ -1,7 +1,7 @@
 import { MessageType, NotificationType, Plan } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { redis } from '../lib/redis.js';
-import { emitToGroup, emitToUser, removeUserFromRoom } from '../lib/socket.js';
+import { emitToGroup, emitToUser, removeUserFromRoom, isUserInRoom } from '../lib/socket.js';
 import { createNotification } from './notifications.service.js';
 
 const MAX_MSG_GRATUIT_PER_DAY = 5;
@@ -160,12 +160,35 @@ export async function getGroupMessages(groupId: string, userId: string, cursor?:
   return { items, nextCursor: hasNextPage ? items[0]?.id : null, hasNextPage };
 }
 
+// Numele expeditorului din profil (elev sau antreprenor), fallback „Cineva".
+function senderDisplayName(sender: {
+  profileElev?: { firstName: string; lastName: string; username?: string | null } | null;
+  profileAntreprenor?: { firstName: string; lastName: string; username?: string | null } | null;
+}): string {
+  const p = sender.profileElev ?? sender.profileAntreprenor;
+  if (!p) return 'Cineva';
+  const full = `${p.firstName} ${p.lastName}`.trim();
+  return full || p.username || 'Cineva';
+}
+
+// Preview scurt pentru notificare — la fișiere afișăm „X a trimis o poză/un
+// videoclip/un fișier" în loc de numele tehnic al fișierului.
+function groupNotifPreview(type: MessageType, content: string, senderName: string): string {
+  if (type === MessageType.IMAGE) return `${senderName} a trimis o poză`;
+  if (type === MessageType.VIDEO) return `${senderName} a trimis un videoclip`;
+  if (type === MessageType.PDF)   return `${senderName} a trimis un fișier`;
+  const text = content.length > 60 ? content.slice(0, 57) + '...' : content;
+  return `${senderName}: ${text}`;
+}
+
 export async function sendGroupMessage(
   groupId: string,
   senderId: string,
   senderPlan: Plan,
   content: string,
   replyToId?: string,
+  type: MessageType = MessageType.TEXT,
+  fileUrl?: string,
 ) {
   const member = await prisma.ideaGroupMember.findUnique({
     where: { groupId_userId: { groupId, userId: senderId } },
@@ -199,7 +222,7 @@ export async function sendGroupMessage(
   // Tranzacție: creăm mesajul și actualizăm lastMessageAt al grupului
   const [message] = await prisma.$transaction([
     prisma.groupMessage.create({
-      data: { groupId, senderId, content, replyToId: replyToId ?? null },
+      data: { groupId, senderId, content, replyToId: replyToId ?? null, type, fileUrl: fileUrl ?? null },
       select: {
         id: true,
         content: true,
@@ -238,6 +261,10 @@ export async function sendGroupMessage(
     // Emit personal (prinde membrii cu app deschisă dar nu în chat de grup)
     emitToUser(receiverId, 'group:message:new', { groupId, message });
 
+    // Dacă membrul e deja în grup, vede mesajul direct → fără notificare persistentă
+    const inGroupChat = await isUserInRoom(`group:${groupId}`, receiverId);
+    if (inGroupChat) continue;
+
     // Notificare persistentă (upsert per grup)
     prisma.notification.findFirst({
       where: {
@@ -260,7 +287,7 @@ export async function sendGroupMessage(
           userId: receiverId,
           type: NotificationType.GROUP_MESSAGE,
           title: `Mesaj nou în ${groupWithMembers.name}`,
-          body: content.length > 60 ? content.slice(0, 57) + '...' : content,
+          body: groupNotifPreview(type, content, senderDisplayName(message.sender)),
           data: { groupId, senderId, count: '1' },
         });
       }

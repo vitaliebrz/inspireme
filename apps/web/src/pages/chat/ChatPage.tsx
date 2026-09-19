@@ -1,7 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { Send, Paperclip, Flag, ArrowLeft, Loader2, MessageSquare, Handshake, CheckCircle2, Clock, TrendingUp, Trophy, Search, X, MoreVertical, BellOff, Bell, Check, CheckCheck, Users, UserPlus, Pencil, SquarePen, CornerUpLeft, ArrowDown, Camera, HeadphonesIcon, Lightbulb } from 'lucide-react';
+import { Send, Paperclip, Flag, ArrowLeft, Loader2, MessageSquare, Handshake, TrendingUp, Search, X, MoreVertical, BellOff, Bell, Check, CheckCheck, Users, UserPlus, Pencil, SquarePen, CornerUpLeft, ArrowDown, Camera, HeadphonesIcon, Lightbulb, Download } from 'lucide-react';
 import { api } from '../../lib/api';
 import { playMessageSound } from '../../lib/sounds';
 import { useAuth } from '../../context/AuthContext';
@@ -50,6 +50,9 @@ interface Message {
   ideaId: string | null;
   idea: { id: string; title: string } | null;
   replyTo: ReplyInfo | null;
+  // Stare optimistă de upload (doar pe client, până confirmă serverul)
+  uploading?: boolean;
+  progress?: number;
 }
 
 interface ConnectionRequest {
@@ -118,6 +121,9 @@ interface GroupMessage {
   createdAt: string;
   sender: GroupMemberUser;
   replyTo: ReplyInfo | null;
+  // Stare optimistă de upload (doar pe client, până confirmă serverul)
+  uploading?: boolean;
+  progress?: number;
 }
 
 interface UserSearchResult {
@@ -173,6 +179,140 @@ function relativeTime(dt: string) {
   return new Date(dt).toLocaleDateString('ro-RO', { day: '2-digit', month: 'short' });
 }
 
+// Etichetă scurtă pentru preview-uri (listă conversații, reply) — distinge tipul fișierului
+function fileLabel(type: string) {
+  if (type === 'IMAGE') return '🖼 Imagine';
+  if (type === 'VIDEO') return '🎥 Video';
+  return '📎 Fișier';
+}
+
+// Livrare video redabilă peste tot: video-urile noi vin deja transcodate (eager mp4)
+// de pe server. Pentru cele vechi (URL brut .mov = HEVC, nesuportat pe desktop) aplicăm
+// transformarea la livrare (mp4/H.264, q_auto:good, cap 1080p). Nu dublăm transformarea.
+function cloudinaryVideoSrc(url: string): string {
+  if (!url.includes('/video/upload/')) return url; // blob local sau alt host
+  const after = url.split('/video/upload/')[1] ?? '';
+  // Dacă începe cu versiunea (v123/) → URL brut, fără transformare → o adăugăm.
+  // Altfel are deja o transformare (eager) → îl lăsăm neatins.
+  if (!/^v\d+\//.test(after)) return url;
+  return url.replace('/video/upload/', '/video/upload/f_mp4,q_auto:good,w_1080,c_limit/');
+}
+
+// Player video cu reîncercare automată: imediat după upload, Cloudinary poate încă
+// transcoda (răspunde 423) — reîncercăm de câteva ori până devine disponibil.
+function ChatVideo({ src, onLoaded }: { src: string; onLoaded?: () => void }) {
+  const [attempt, setAttempt] = useState(0);
+  const finalSrc = cloudinaryVideoSrc(src);
+  return (
+    <video
+      key={attempt}
+      src={finalSrc}
+      controls
+      preload="metadata"
+      className="rounded-lg max-w-full max-h-72"
+      onLoadedMetadata={onLoaded}
+      onError={() => {
+        if (attempt < 5) setTimeout(() => setAttempt((a) => a + 1), 2500);
+      }}
+    />
+  );
+}
+
+// Tipul fișierului pentru preview optimist — robust când browserul raportează
+// mimetype gol/octet-stream (frecvent pentru mp4 pe laptop/Android): cade pe extensie.
+function fileKind(file: File): 'IMAGE' | 'VIDEO' | 'PDF' {
+  if (file.type.startsWith('image/')) return 'IMAGE';
+  if (file.type.startsWith('video/')) return 'VIDEO';
+  const n = file.name.toLowerCase();
+  if (/\.(jpg|jpeg|png|webp|heic|heif|gif)$/.test(n)) return 'IMAGE';
+  if (/\.(mp4|m4v|mov|webm|3gp|3g2|avi|mkv|ogv|mpeg|mpg)$/.test(n)) return 'VIDEO';
+  return 'PDF';
+}
+
+// Inel de progres stil Telegram — determinat (procent) sau nedeterminat (rotire),
+// afișat peste preview în timpul upload-ului.
+function UploadRing({ progress }: { progress: number }) {
+  const r = 20, size = 52, c = 2 * Math.PI * r;
+  const done = progress >= 100;
+  const offset = c - (Math.min(progress, 100) / 100) * c;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className={done ? 'upload-ring-spin' : ''}>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="rgba(0,0,0,0.5)" />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth={3} />
+      <circle
+        cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#fff" strokeWidth={3} strokeLinecap="round"
+        strokeDasharray={done ? `${c * 0.25} ${c}` : c}
+        strokeDashoffset={done ? 0 : offset}
+        transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        style={{ transition: done ? 'none' : 'stroke-dashoffset 0.2s ease' }}
+      />
+      {!done && (
+        <text x={size / 2} y={size / 2} textAnchor="middle" dominantBaseline="central" fill="#fff" fontSize={11} fontWeight={700}>
+          {Math.round(progress)}%
+        </text>
+      )}
+    </svg>
+  );
+}
+
+// Randare mesaj non-text (imagine/video/pdf) — preview inline pentru imagine/video, link de download pentru restul.
+// `upload` prezent → afișăm inelul de progres peste preview (stil Telegram).
+function renderFileMessage(
+  type: string,
+  fileUrl: string | null,
+  label: string,
+  upload?: { progress: number },
+  onOpenImage?: (url: string) => void,
+  onMediaLoad?: () => void,
+) {
+  const isUploading = !!upload;
+
+  if (type === 'IMAGE' && fileUrl) {
+    const img = <img src={fileUrl} alt={label} className="rounded-lg max-w-full max-h-72 object-cover" loading="lazy" onLoad={onMediaLoad} style={isUploading ? { filter: 'brightness(0.7)' } : undefined} />;
+    if (isUploading) {
+      return (
+        <div className="relative inline-block">
+          {img}
+          <div className="absolute inset-0 flex items-center justify-center"><UploadRing progress={upload.progress} /></div>
+        </div>
+      );
+    }
+    // Click → lightbox în aplicație (mărește imaginea), nu deschidere link brut
+    return (
+      <button type="button" onClick={() => onOpenImage?.(fileUrl)} className="block cursor-zoom-in">
+        {img}
+      </button>
+    );
+  }
+
+  if (type === 'VIDEO' && fileUrl) {
+    if (isUploading) {
+      return (
+        <div className="relative inline-block">
+          <video src={fileUrl} muted preload="metadata" className="rounded-lg max-w-full max-h-72" style={{ filter: 'brightness(0.7)' }} />
+          <div className="absolute inset-0 flex items-center justify-center"><UploadRing progress={upload.progress} /></div>
+        </div>
+      );
+    }
+    return <ChatVideo src={fileUrl} onLoaded={onMediaLoad} />;
+  }
+
+  // Document (PDF etc.) — rând cu iconiță; în timpul upload-ului, inel mic de progres
+  if (isUploading) {
+    return (
+      <div className="flex items-center gap-2.5">
+        <div className="scale-75 origin-left"><UploadRing progress={upload.progress} /></div>
+        <span className="text-sm truncate" style={{ opacity: 0.85 }}>{label}</span>
+      </div>
+    );
+  }
+  return (
+    <a href={fileUrl ?? '#'} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 underline">
+      📎 {label}
+    </a>
+  );
+}
+
 type ApiError = { response?: { data?: { error?: string } } };
 
 export default function ChatPage() {
@@ -181,7 +321,8 @@ export default function ChatPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
-  const { notifications, markConversation, markGroup, markSupport } = useNotifications();
+  const { markConversation, markGroup, markSupport,
+    unreadByConversation, unreadByGroup, unreadBySupport } = useNotifications();
   const { socket } = useSocket();
 
   // ideaId din URL (?ideaId=xxx) — setat când antreprenorul vine din pagina unei idei
@@ -193,6 +334,10 @@ export default function ChatPage() {
   const [collaborations, setCollaborations] = useState<Collaboration[]>([]);
   const [investments, setInvestments] = useState<Investment[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+  // Paginare istoric 1:1 (încarcă mesaje mai vechi la scroll în sus)
+  const [msgCursor, setMsgCursor] = useState<string | null>(null);
+  const [hasMoreMsgs, setHasMoreMsgs] = useState(false);
+  const [loadingOlderMsgs, setLoadingOlderMsgs] = useState(false);
   const [pairIdeas, setPairIdeas] = useState<PairIdea[]>([]);
   const [proposeInvIdeaId, setProposeInvIdeaId] = useState<string | null>(null);
 
@@ -206,6 +351,10 @@ export default function ChatPage() {
   const [groupMsgLimitReached, setGroupMsgLimitReached] = useState(false);
   const [groupMessages, setGroupMessages] = useState<GroupMessage[]>([]);
   const [loadingGroupMsgs, setLoadingGroupMsgs] = useState(false);
+  // Paginare istoric grup (mesaje mai vechi la scroll în sus)
+  const [groupMsgCursor, setGroupMsgCursor] = useState<string | null>(null);
+  const [hasMoreGroupMsgs, setHasMoreGroupMsgs] = useState(false);
+  const [loadingOlderGroupMsgs, setLoadingOlderGroupMsgs] = useState(false);
   const [groupText, setGroupText] = useState('');
   const [sendingGroup, setSendingGroup] = useState(false);
   const [replyingToChat, setReplyingToChat] = useState<{ id: string; senderName: string; content: string | null; type: string } | null>(null);
@@ -230,7 +379,17 @@ export default function ChatPage() {
   const [groupNewName, setGroupNewName] = useState('');
   const [savingGroupName, setSavingGroupName] = useState(false);
   const [uploadingGroupAvatar, setUploadingGroupAvatar] = useState(false);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+
+  // Închide lightbox-ul cu Esc
+  useEffect(() => {
+    if (!lightboxUrl) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setLightboxUrl(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [lightboxUrl]);
   const groupAvatarInputRef = useRef<HTMLInputElement>(null);
+  const groupFileInputRef = useRef<HTMLInputElement>(null);
   const [addMemberSearch, setAddMemberSearch] = useState('');
   const [addMemberResults, setAddMemberResults] = useState<UserSearchResult[]>([]);
   const [addMemberSuggestions, setAddMemberSuggestions] = useState<UserSearchResult[]>([]);
@@ -330,30 +489,9 @@ export default function ChatPage() {
   }, [conversations, groups]);
 
   // Număr mesaje necitite per conversație — citit din data.count al notificării MESSAGE_NEW
-  const unreadByConv = useMemo(() => {
-    const map: Record<string, number> = {};
-    for (const n of notifications) {
-      if (n.type === 'MESSAGE_NEW' && !n.readAt) {
-        const d = n.data as Record<string, string>;
-        const convId = d['conversationId'];
-        if (convId) map[convId] = parseInt(d['count'] ?? '1', 10);
-      }
-    }
-    return map;
-  }, [notifications]);
-
-  // Număr mesaje necitite suport per ticket — din notificări SUPPORT_MESSAGE
-  const unreadBySupport = useMemo(() => {
-    const map: Record<string, number> = {};
-    for (const n of notifications) {
-      if (n.type === 'SUPPORT_MESSAGE' && !n.readAt) {
-        const d = n.data as Record<string, string>;
-        const ticketId = d['ticketId'];
-        if (ticketId) map[ticketId] = (map[ticketId] ?? 0) + 1;
-      }
-    }
-    return map;
-  }, [notifications]);
+  // Numărul necititelor per conversație/grup/suport vine acum din count-urile exacte
+  // ale backend-ului (lista de notificări e plafonată la 50, deci nu se putea calcula din ea).
+  const unreadByConv = unreadByConversation;
   const totalSupportUnread = Object.values(unreadBySupport).reduce((a, b) => a + b, 0);
 
   // Tickete suport sortate: cu necitite primul, apoi după ultimul mesaj DESC
@@ -369,20 +507,7 @@ export default function ChatPage() {
     });
   }, [adminSupportTickets, unreadBySupport]);
 
-  // Număr mesaje necitite per grup din notificări (persistente după refresh)
-  const unreadByGroup = useMemo(() => {
-    const map: Record<string, number> = {};
-    for (const n of notifications) {
-      if (n.type === 'GROUP_MESSAGE' && !n.readAt) {
-        const d = n.data as Record<string, string>;
-        const gId = d['groupId'];
-        if (gId) map[gId] = parseInt(d['count'] ?? '1', 10);
-      }
-    }
-    return map;
-  }, [notifications]);
-
-  // Merge: contorul local (real-time via socket) + notificări (persistente)
+  // Merge: contorul local (real-time via socket) + count-uri backend (persistente)
   const effectiveGroupUnread = useMemo(() => {
     const merged: Record<string, number> = { ...unreadByGroup };
     for (const [gId, count] of Object.entries(groupUnreadLocal)) {
@@ -519,6 +644,7 @@ export default function ChatPage() {
     const handleNew = (msg: SupportMsg) => {
       const isOwn = activeSupportId === 'me' ? msg.senderId === user?.id : msg.isAdmin;
       if (isOwn) return;
+      void playMessageSound(); // sunet la mesaj primit, chiar dacă ești în chatul de suport
       setSupportTicket((prev) => prev ? { ...prev, messages: [...prev.messages, msg] } : prev);
       // Actualizează preview în lista admin
       if (isAdmin) {
@@ -789,10 +915,13 @@ export default function ChatPage() {
         );
       }
 
-      // Sunet + contor local pentru grupuri inactive și mesaje de la alții
-      if (data.groupId !== activeGroupId && data.message.type !== 'EVENT' && data.message.sender.id !== user?.id) {
+      // Sunet la orice mesaj de la altcineva — inclusiv când ești chiar în acel grup
+      if (data.message.type !== 'EVENT' && data.message.sender.id !== user?.id) {
         void playMessageSound();
-        setGroupUnreadLocal((prev) => ({ ...prev, [data.groupId]: (prev[data.groupId] ?? 0) + 1 }));
+        // Contor local (badge) doar pentru grupurile pe care NU le privești acum
+        if (data.groupId !== activeGroupId) {
+          setGroupUnreadLocal((prev) => ({ ...prev, [data.groupId]: (prev[data.groupId] ?? 0) + 1 }));
+        }
       }
 
       // Dacă grupul e activ — adăugăm mesajul în chat și marcăm ca citit
@@ -854,8 +983,11 @@ export default function ChatPage() {
     setNewGroupMsgs(0);
     setGroupMsgLimitReached(false);
     setLoadingGroupMsgs(true);
-    api.get<{ items: GroupMessage[] }>(`/groups/${activeGroupId}/messages`)
-      .then(({ data }) => setGroupMessages(data.items))
+    setGroupMessages([]); // golim mesajele grupului anterior → forțează scroll-ul inițial pe cele noi
+    setGroupMsgCursor(null);
+    setHasMoreGroupMsgs(false);
+    api.get<{ items: GroupMessage[]; nextCursor: string | null; hasNextPage: boolean }>(`/groups/${activeGroupId}/messages`)
+      .then(({ data }) => { setGroupMessages(data.items); setGroupMsgCursor(data.nextCursor); setHasMoreGroupMsgs(data.hasNextPage); })
       .catch(() => {})
       .finally(() => setLoadingGroupMsgs(false));
   }, [activeGroupId]);
@@ -868,10 +1000,14 @@ export default function ChatPage() {
     setNewChatMsgs(0);
     setMsgLimitReached(false);
     setMessages([]);
+    setMsgCursor(null);
+    setHasMoreMsgs(false);
     setLoadingMsgs(true);
-    api.get<{ items: Message[] }>(`/chat/conversations/${conversationId}/messages`)
+    api.get<{ items: Message[]; nextCursor: string | null; hasNextPage: boolean }>(`/chat/conversations/${conversationId}/messages`)
       .then(({ data }) => {
         setMessages(data.items);
+        setMsgCursor(data.nextCursor);
+        setHasMoreMsgs(data.hasNextPage);
         api.patch(`/chat/conversations/${conversationId}/read`).catch(() => {});
       })
       .finally(() => setLoadingMsgs(false));
@@ -931,14 +1067,81 @@ export default function ChatPage() {
     if (isNearBottomRef.current) messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Scroll la ultimul mesaj la deschiderea unui grup
+  // Scroll la fund dacă userul e deja jos — apelat când o imagine/video din chat
+  // s-a încărcat (onLoad). Fiabil pe toate platformele (spre deosebire de ResizeObserver
+  // pe un element flex-1, care pe desktop/iOS nu-și schimbă înălțimea).
+  const scrollToBottomIfNear = useCallback(() => {
+    const c = messagesContainerRef.current;
+    if (c && isNearBottomRef.current) c.scrollTop = c.scrollHeight;
+  }, []);
+
+  // Încarcă mesaje MAI VECHI (istoric) la scroll în sus, păstrând poziția vizuală.
+  const loadOlderMessages = useCallback(async () => {
+    if (!conversationId || !msgCursor || loadingOlderMsgs || !hasMoreMsgs) return;
+    const container = messagesContainerRef.current;
+    const prevHeight = container?.scrollHeight ?? 0;
+    setLoadingOlderMsgs(true);
+    try {
+      const { data } = await api.get<{ items: Message[]; nextCursor: string | null; hasNextPage: boolean }>(
+        `/chat/conversations/${conversationId}/messages?cursor=${msgCursor}`,
+      );
+      setMessages((prev) => [...data.items, ...prev]);
+      setMsgCursor(data.nextCursor);
+      setHasMoreMsgs(data.hasNextPage);
+      requestAnimationFrame(() => {
+        if (container) container.scrollTop = container.scrollHeight - prevHeight;
+      });
+    } catch { /* silent */ } finally {
+      setLoadingOlderMsgs(false);
+    }
+  }, [conversationId, msgCursor, loadingOlderMsgs, hasMoreMsgs]);
+
+  const loadOlderGroupMessages = useCallback(async () => {
+    if (!activeGroupId || !groupMsgCursor || loadingOlderGroupMsgs || !hasMoreGroupMsgs) return;
+    const container = messagesContainerRef.current;
+    const prevHeight = container?.scrollHeight ?? 0;
+    setLoadingOlderGroupMsgs(true);
+    try {
+      const { data } = await api.get<{ items: GroupMessage[]; nextCursor: string | null; hasNextPage: boolean }>(
+        `/groups/${activeGroupId}/messages?cursor=${groupMsgCursor}`,
+      );
+      setGroupMessages((prev) => [...data.items, ...prev]);
+      setGroupMsgCursor(data.nextCursor);
+      setHasMoreGroupMsgs(data.hasNextPage);
+      requestAnimationFrame(() => {
+        if (container) container.scrollTop = container.scrollHeight - prevHeight;
+      });
+    } catch { /* silent */ } finally {
+      setLoadingOlderGroupMsgs(false);
+    }
+  }, [activeGroupId, groupMsgCursor, loadingOlderGroupMsgs, hasMoreGroupMsgs]);
+
+  // Scroll la ultimul mesaj la deschiderea unui grup.
+  // Re-scroll cu întârziere pentru conținut care se încarcă async (imagini/video lazy),
+  // ca ultimul mesaj să nu rămână sub ecran după ce media își ocupă înălțimea.
   useLayoutEffect(() => {
     if (!activeGroupId || groupMessages.length === 0 || groupInitialScrollDoneRef.current) return;
     const container = messagesContainerRef.current;
     if (!container) return;
-    container.scrollTop = container.scrollHeight;
+    const toBottom = () => { container.scrollTop = container.scrollHeight; };
+    toBottom();
     groupInitialScrollDoneRef.current = true;
+    requestAnimationFrame(toBottom);
   }, [activeGroupId, groupMessages.length]);
+
+  // Menține scroll-ul la fund când conținutul își schimbă înălțimea (imagini/video
+  // lazy care se încarcă după randare) — ResizeObserver reacționează exact la momentul
+  // potrivit, indiferent cât durează încărcarea. Doar dacă userul e deja jos.
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    const inner = container?.firstElementChild;
+    if (!container || !inner) return;
+    const ro = new ResizeObserver(() => {
+      if (isNearBottomRef.current) container.scrollTop = container.scrollHeight;
+    });
+    ro.observe(inner);
+    return () => ro.disconnect();
+  }, [activeGroupId, conversationId, activeSupportId]);
 
   // Scroll smooth la mesaje noi în grup — doar dacă userul e aproape de fund
   useEffect(() => {
@@ -984,6 +1187,19 @@ export default function ChatPage() {
       navigate('/chat', { replace: true });
     }
   }, [location.search, groups, navigate]);
+
+  // Deschide ticketul de suport indicat de ?support= (admin apasă „Chat" în panoul admin)
+  const openedSupportParamRef = useRef(false);
+  useEffect(() => {
+    const sId = new URLSearchParams(location.search).get('support');
+    if (!sId || !isAdmin || openedSupportParamRef.current) return;
+    openedSupportParamRef.current = true;
+    // Reîmprospătăm lista (ticketul poate fi nou) apoi deschidem conversația
+    api.get<{ tickets: AdminTicketItem[] }>('/support/admin')
+      .then(({ data }) => setAdminSupportTickets(data.tickets))
+      .catch(() => {})
+      .finally(() => void openSupport(sId));
+  }, [location.search, isAdmin, openSupport]);
 
   // Previne scroll orizontal al paginii în timp ce se face swipe pe un mesaj.
   // React atașează onTouchMove ca listener pasiv (nu poate chema preventDefault),
@@ -1051,6 +1267,60 @@ export default function ChatPage() {
       }
     } finally {
       setSendingGroup(false);
+    }
+  };
+
+  // Trimitere poză/video/PDF în grup
+  const handleGroupFileUpload = async (file: File) => {
+    if (!activeGroupId) return;
+
+    // Mesaj optimist cu inel de progres (stil Telegram)
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const kind = fileKind(file);
+    const localPreview = kind === 'IMAGE' || kind === 'VIDEO' ? URL.createObjectURL(file) : null;
+    const meAsSender: GroupMemberUser = {
+      id: user?.id ?? '',
+      profileElev: user?.role === 'ELEV'
+        ? { firstName: user.firstName ?? '', lastName: user.lastName ?? '', username: null, avatarUrl: user.avatarUrl ?? null }
+        : null,
+      profileAntreprenor: user?.role === 'ANTREPRENOR'
+        ? { firstName: user.firstName ?? '', lastName: user.lastName ?? '', username: null, avatarUrl: user.avatarUrl ?? null, company: null }
+        : null,
+    };
+    const placeholder: GroupMessage = {
+      id: tempId, content: file.name, type: kind, fileUrl: localPreview,
+      createdAt: new Date().toISOString(), sender: meAsSender, replyTo: null, uploading: true, progress: 0,
+    };
+    setGroupMessages((prev) => [...prev, placeholder]);
+    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 0);
+
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const { data } = await api.post<GroupMessage>(`/groups/${activeGroupId}/upload`, formData, {
+        onUploadProgress: (e) => {
+          const pct = e.total ? Math.round((e.loaded / e.total) * 100) : 0;
+          setGroupMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, progress: pct } : m)));
+        },
+      });
+      setGroupMessages((prev) => [...prev.filter((m) => m.id !== tempId && m.id !== data.id), data]);
+      setGroups((prev) =>
+        prev.map((g) =>
+          g.id === activeGroupId
+            ? { ...g, lastMessageAt: data.createdAt, messages: [{ content: data.content, type: data.type, createdAt: data.createdAt, senderId: data.sender.id }] }
+            : g,
+        ),
+      );
+    } catch (err) {
+      setGroupMessages((prev) => prev.filter((m) => m.id !== tempId));
+      const status = (err as { response?: { status?: number } }).response?.status;
+      if (status === 429) {
+        setGroupMsgLimitReached(true);
+      } else {
+        toast((err as ApiError).response?.data?.error ?? 'Eroare la upload fișier.', 'error');
+      }
+    } finally {
+      if (localPreview) URL.revokeObjectURL(localPreview);
     }
   };
 
@@ -1260,15 +1530,35 @@ export default function ChatPage() {
 
   const handleFileUpload = async (file: File) => {
     if (!conversationId) return;
+
+    // Mesaj optimist cu inel de progres (stil Telegram) — apare instant, cu preview local
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const kind = fileKind(file);
+    const localPreview = kind === 'IMAGE' || kind === 'VIDEO' ? URL.createObjectURL(file) : null;
+    const placeholder: Message = {
+      id: tempId, content: file.name, type: kind, fileUrl: localPreview,
+      createdAt: new Date().toISOString(), senderId: user?.id ?? '', readAt: null,
+      ideaId: null, idea: null, replyTo: null, uploading: true, progress: 0,
+    };
+    setMessages((prev) => [...prev, placeholder]);
+    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 0);
+
     const formData = new FormData();
     formData.append('file', file);
     try {
-      const { data } = await api.post<Message>(`/chat/conversations/${conversationId}/upload`, formData);
-      setMessages((prev) => prev.some((m) => m.id === data.id) ? prev : [...prev, data]);
-      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 0);
-      // Livrare în timp real: server-side (emitToConversation în sendMessage).
-    } catch {
-      toast('Eroare la upload fișier.', 'error');
+      const { data } = await api.post<Message>(`/chat/conversations/${conversationId}/upload`, formData, {
+        onUploadProgress: (e) => {
+          const pct = e.total ? Math.round((e.loaded / e.total) * 100) : 0;
+          setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, progress: pct } : m)));
+        },
+      });
+      // Înlocuim placeholder-ul cu mesajul real (și evităm duplicat dacă a venit deja prin socket)
+      setMessages((prev) => [...prev.filter((m) => m.id !== tempId && m.id !== data.id), data]);
+    } catch (err) {
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
+      toast((err as ApiError).response?.data?.error ?? 'Eroare la upload fișier.', 'error');
+    } finally {
+      if (localPreview) URL.revokeObjectURL(localPreview);
     }
   };
 
@@ -1289,10 +1579,19 @@ export default function ChatPage() {
 
   const handleReport = async () => {
     if (!conversationId || reportReason.trim().length < 10) return;
-    await api.post('/chat/report', { contentType: 'USER', contentId: conversationId, reason: reportReason });
-    setShowReport(false);
-    setReportReason('');
-    toast('Raportul a fost trimis. Mulțumim!', 'success');
+    // Raportăm celălalt participant (userul), nu conversația — pentru auto-suspendare
+    // la 3 rapoarte de la utilizatori diferiți.
+    const conv = conversations.find((c) => c.id === conversationId);
+    if (!conv) return;
+    const otherUserId = conv.participantA.id === user?.id ? conv.participantB.id : conv.participantA.id;
+    try {
+      await api.post('/chat/report', { contentType: 'USER', contentId: otherUserId, reason: reportReason });
+      setShowReport(false);
+      setReportReason('');
+      toast('Raportul a fost trimis. Mulțumim!', 'success');
+    } catch {
+      toast('Eroare la trimiterea raportului.', 'error');
+    }
   };
 
   const activeConv = conversations.find((c) => c.id === conversationId);
@@ -1313,8 +1612,11 @@ export default function ChatPage() {
     if (!activeConv?.id || messages.length === 0 || !initialScrollRef.current) return;
     const container = messagesContainerRef.current;
     if (!container) return;
-    container.scrollTop = container.scrollHeight;
+    const toBottom = () => { container.scrollTop = container.scrollHeight; };
+    toBottom();
     initialScrollRef.current = false;
+    // Media care se încarcă async e acoperită de ResizeObserver (vezi efectul dedicat)
+    requestAnimationFrame(toBottom);
   }, [activeConv?.id, messages.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pairCollabs = activeConv
@@ -1617,7 +1919,7 @@ export default function ChatPage() {
                                   color: msgHighlight ? 'var(--text)' : 'var(--text-2)',
                                   fontWeight: msgHighlight ? 600 : 400,
                                 }}>
-                                {lastMsg.type === 'TEXT' ? lastMsg.content : '📎 Fișier'}
+                                {lastMsg.type === 'TEXT' ? lastMsg.content : fileLabel(lastMsg.type)}
                               </p>
                             </div>
                           )}
@@ -1728,7 +2030,7 @@ export default function ChatPage() {
                                 color: msgHighlightG ? 'var(--text)' : 'var(--text-2)',
                                 fontWeight: msgHighlightG ? 600 : 400,
                               }}>
-                              {lastMsg.type === 'TEXT' ? lastMsg.content : lastMsg.type === 'EVENT' ? lastMsg.content : '📎 Fișier'}
+                              {lastMsg.type === 'TEXT' ? lastMsg.content : lastMsg.type === 'EVENT' ? lastMsg.content : fileLabel(lastMsg.type)}
                             </p>
                           </div>
                         )}
@@ -1787,7 +2089,7 @@ export default function ChatPage() {
                                 {unreadSup > 0 && (
                                   <span className="flex items-center justify-center rounded-full text-[10px] font-bold shrink-0"
                                     style={{ minWidth: 18, height: 18, padding: '0 4px', backgroundColor: 'var(--orange)', color: '#fff' }}>
-                                    {unreadSup > 9 ? '9+' : unreadSup}
+                                    {unreadSup > 99 ? '99+' : unreadSup}
                                   </span>
                                 )}
                               </button>
@@ -1826,7 +2128,7 @@ export default function ChatPage() {
               {totalSupportUnread > 0 && (
                 <span className="flex items-center justify-center rounded-full text-[10px] font-bold shrink-0"
                   style={{ minWidth: 18, height: 18, padding: '0 4px', backgroundColor: 'var(--orange)', color: '#fff' }}>
-                  {totalSupportUnread > 9 ? '9+' : totalSupportUnread}
+                  {totalSupportUnread > 99 ? '99+' : totalSupportUnread}
                 </span>
               )}
             </button>
@@ -1887,8 +2189,12 @@ export default function ChatPage() {
                 const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
                 isNearBottomRef.current = nearBottom;
                 if (nearBottom && newGroupMsgs > 0) setNewGroupMsgs(0);
+                if (el.scrollTop < 120) void loadOlderGroupMessages();
               }}>
               <div className="flex-1 p-4 space-y-3" onMouseDown={(e) => e.preventDefault()}>
+                {loadingOlderGroupMsgs && (
+                  <div className="flex justify-center py-1"><Loader2 size={16} className="animate-spin" style={{ color: 'var(--text-2)' }} /></div>
+                )}
                 {loadingGroupMsgs ? (
                   <div className="flex items-center justify-center h-full">
                     <Loader2 size={24} className="animate-spin" style={{ color: 'var(--text-2)' }} />
@@ -1913,6 +2219,7 @@ export default function ChatPage() {
                     }
 
                     const mine = msg.sender.id === user?.id;
+                    const isMedia = msg.type === 'IMAGE' || msg.type === 'VIDEO';
                     const senderName = getGroupUserName(msg.sender);
                     const senderAvatar = getGroupUserAvatar(msg.sender);
                     const replyTrigger = () => setReplyingToGroup({ id: msg.id, senderName: mine ? 'Tu' : senderName, content: msg.content, type: msg.type });
@@ -1953,11 +2260,11 @@ export default function ChatPage() {
                                 {senderName}
                               </p>
                             )}
-                            <div className="px-4 py-2.5 text-sm"
+                            <div className={`text-sm ${isMedia ? '' : 'px-4 py-2.5'}`}
                               style={{
-                                backgroundColor: mine ? 'var(--orange)' : 'var(--bg-2)',
-                                color: mine ? '#fff' : 'var(--text)',
-                                borderRadius: mine ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+                                backgroundColor: isMedia ? 'transparent' : (mine ? 'var(--orange)' : 'var(--bg-2)'),
+                                color: isMedia ? 'var(--text)' : (mine ? '#fff' : 'var(--text)'),
+                                borderRadius: isMedia ? '0' : (mine ? '18px 18px 4px 18px' : '18px 18px 18px 4px'),
                               }}>
                               {msg.replyTo && (
                                 <div className="flex gap-1.5 mb-2 pb-2 rounded-lg px-2 py-1.5"
@@ -1971,18 +2278,17 @@ export default function ChatPage() {
                                       {getReplyInfoSenderName(msg.replyTo)}
                                     </p>
                                     <p className="text-[11px] truncate" style={{ color: mine ? 'rgba(255,255,255,0.6)' : 'var(--text-2)' }}>
-                                      {msg.replyTo.type === 'TEXT' ? msg.replyTo.content : '📎 Fișier'}
+                                      {msg.replyTo.type === 'TEXT' ? msg.replyTo.content : fileLabel(msg.replyTo.type)}
                                     </p>
                                   </div>
                                 </div>
                               )}
                               {msg.type === 'TEXT'
                                 ? <p className="whitespace-pre-wrap wrap-break-word">{msg.content}</p>
-                                : <a href={msg.fileUrl ?? '#'} target="_blank" rel="noopener noreferrer"
-                                    className="flex items-center gap-2 underline">📎 Fișier</a>
+                                : renderFileMessage(msg.type, msg.fileUrl, msg.content ?? 'Fișier', msg.uploading ? { progress: msg.progress ?? 0 } : undefined, setLightboxUrl, scrollToBottomIfNear)
                               }
-                              <p className="text-xs mt-1 text-right"
-                                style={{ color: mine ? 'rgba(255,255,255,0.65)' : 'var(--text-2)' }}>
+                              <p className={`text-xs mt-1 text-right ${isMedia ? 'pr-0.5' : ''}`}
+                                style={{ color: isMedia ? 'var(--text-2)' : (mine ? 'rgba(255,255,255,0.65)' : 'var(--text-2)') }}>
                                 {relativeTime(msg.createdAt)}
                               </p>
                             </div>
@@ -2035,7 +2341,7 @@ export default function ChatPage() {
                         {replyingToGroup.senderName}
                       </p>
                       <p className="text-[11px] truncate" style={{ color: 'var(--text-2)' }}>
-                        {replyingToGroup.type === 'TEXT' ? replyingToGroup.content : '📎 Fișier'}
+                        {replyingToGroup.type === 'TEXT' ? replyingToGroup.content : fileLabel(replyingToGroup.type)}
                       </p>
                     </div>
                     <button onClick={() => setReplyingToGroup(null)} className="shrink-0 p-1" style={{ color: 'var(--text-2)' }} aria-label="Anulează reply">
@@ -2049,6 +2355,17 @@ export default function ChatPage() {
                     borderTop: '1px solid var(--border)',
                     paddingBottom: 'max(1rem, env(safe-area-inset-bottom))',
                   }}>
+                <input
+                  ref={groupFileInputRef} type="file" className="hidden"
+                  tabIndex={-1}
+                  accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf,video/*"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleGroupFileUpload(f); e.target.value = ''; }}
+                />
+                <button type="button" onClick={() => groupFileInputRef.current?.click()}
+                  className="p-3 rounded-xl shrink-0"
+                  style={{ backgroundColor: 'var(--bg-3)', color: 'var(--text-2)' }}>
+                  <Paperclip size={18} />
+                </button>
                 <textarea
                   ref={groupInputRef}
                   value={groupText}
@@ -2309,10 +2626,14 @@ export default function ChatPage() {
                 const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
                 isNearBottomRef.current = nearBottom;
                 if (nearBottom && newChatMsgs > 0) setNewChatMsgs(0);
+                if (el.scrollTop < 120) void loadOlderMessages();
               }}>
 
               {/* Mesaje — flex-1 împinge form-ul la fund când sunt puține mesaje */}
               <div className="flex-1 p-4 space-y-3" onMouseDown={(e) => e.preventDefault()}>
+                {loadingOlderMsgs && (
+                  <div className="flex justify-center py-1"><Loader2 size={16} className="animate-spin" style={{ color: 'var(--text-2)' }} /></div>
+                )}
                 {loadingMsgs ? (
                   <div className="flex items-center justify-center h-full">
                     <Loader2 size={24} className="animate-spin" style={{ color: 'var(--text-2)' }} />
@@ -2325,6 +2646,7 @@ export default function ChatPage() {
                 ) : (
                   messages.map((msg, msgIdx) => {
                     const mine = msg.senderId === user?.id;
+                    const isMedia = msg.type === 'IMAGE' || msg.type === 'VIDEO';
                     const otherP = mine ? null : (activeConv.participantA.id === user?.id ? activeConv.participantB : activeConv.participantA);
                     const otherName = otherP
                       ? (otherP.profileElev ? `${otherP.profileElev.firstName} ${otherP.profileElev.lastName}` : otherP.profileAntreprenor ? `${otherP.profileAntreprenor.firstName} ${otherP.profileAntreprenor.lastName}` : 'Utilizator')
@@ -2388,11 +2710,11 @@ export default function ChatPage() {
                             <CornerUpLeft size={14} />
                           </button>
                         )}
-                        <div className="max-w-xs lg:max-w-sm px-4 py-2.5 text-sm"
+                        <div className={`max-w-xs lg:max-w-sm text-sm ${isMedia ? '' : 'px-4 py-2.5'}`}
                           style={{
-                            backgroundColor: mine ? 'var(--orange)' : 'var(--bg-2)',
-                            color: mine ? '#fff' : 'var(--text)',
-                            borderRadius: mine ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+                            backgroundColor: isMedia ? 'transparent' : (mine ? 'var(--orange)' : 'var(--bg-2)'),
+                            color: isMedia ? 'var(--text)' : (mine ? '#fff' : 'var(--text)'),
+                            borderRadius: isMedia ? '0' : (mine ? '18px 18px 4px 18px' : '18px 18px 18px 4px'),
                           }}>
                           {msg.replyTo && (
                             <div className="flex gap-1.5 mb-2 pb-2 rounded-lg px-2 py-1.5"
@@ -2406,26 +2728,23 @@ export default function ChatPage() {
                                   {getReplyInfoSenderName(msg.replyTo)}
                                 </p>
                                 <p className="text-[11px] truncate" style={{ color: mine ? 'rgba(255,255,255,0.6)' : 'var(--text-2)' }}>
-                                  {msg.replyTo.type === 'TEXT' ? msg.replyTo.content : '📎 Fișier'}
+                                  {msg.replyTo.type === 'TEXT' ? msg.replyTo.content : fileLabel(msg.replyTo.type)}
                                 </p>
                               </div>
                             </div>
                           )}
                           {msg.type === 'TEXT'
                             ? <p className="whitespace-pre-wrap wrap-break-word">{msg.content}</p>
-                            : <a href={msg.fileUrl ?? '#'} target="_blank" rel="noopener noreferrer"
-                                className="flex items-center gap-2 underline">
-                                📎 {msg.content}
-                              </a>
+                            : renderFileMessage(msg.type, msg.fileUrl, msg.content, msg.uploading ? { progress: msg.progress ?? 0 } : undefined, setLightboxUrl, scrollToBottomIfNear)
                           }
-                          <div className="flex items-center justify-end gap-1 mt-1">
-                            <span className="text-xs" style={{ color: mine ? 'rgba(255,255,255,0.65)' : 'var(--text-2)' }}>
+                          <div className={`flex items-center justify-end gap-1 mt-1 ${isMedia ? 'pr-0.5' : ''}`}>
+                            <span className="text-xs" style={{ color: isMedia ? 'var(--text-2)' : (mine ? 'rgba(255,255,255,0.65)' : 'var(--text-2)') }}>
                               {relativeTime(msg.createdAt)}
                             </span>
                             {mine && (
                               msg.readAt
-                                ? <CheckCheck size={13} style={{ color: 'rgba(255,255,255,0.95)', flexShrink: 0 }} />
-                                : <Check size={13} style={{ color: 'rgba(255,255,255,0.5)', flexShrink: 0 }} />
+                                ? <CheckCheck size={13} style={{ color: isMedia ? 'var(--orange)' : 'rgba(255,255,255,0.95)', flexShrink: 0 }} />
+                                : <Check size={13} style={{ color: isMedia ? 'var(--text-2)' : 'rgba(255,255,255,0.5)', flexShrink: 0 }} />
                             )}
                           </div>
                         </div>
@@ -2495,7 +2814,7 @@ export default function ChatPage() {
                           {replyingToChat.senderName}
                         </p>
                         <p className="text-[11px] truncate" style={{ color: 'var(--text-2)' }}>
-                          {replyingToChat.type === 'TEXT' ? replyingToChat.content : '📎 Fișier'}
+                          {replyingToChat.type === 'TEXT' ? replyingToChat.content : fileLabel(replyingToChat.type)}
                         </p>
                       </div>
                       <button onClick={() => setReplyingToChat(null)} className="shrink-0 p-1" style={{ color: 'var(--text-2)' }} aria-label="Anulează reply">
@@ -2518,7 +2837,7 @@ export default function ChatPage() {
                     <input
                       ref={fileInputRef} type="file" className="hidden"
                       tabIndex={-1}
-                      accept="image/jpeg,image/png,image/webp,application/pdf"
+                      accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf,video/*"
                       onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleFileUpload(f); e.target.value = ''; }}
                     />
                     <button type="button" onClick={() => fileInputRef.current?.click()}
@@ -2723,9 +3042,9 @@ export default function ChatPage() {
 
       {/* Modal creare grup */}
       {showCreateGroup && createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop-anim"
           style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}>
-          <div className="w-full max-w-md rounded-2xl p-6"
+          <div className="w-full max-w-md rounded-2xl p-6 modal-content-anim"
             style={{ backgroundColor: 'var(--bg-2)', border: '1px solid var(--border)' }}>
             <h3 className="text-base font-bold mb-4" style={{ color: 'var(--text)' }}>
               Grup nou
@@ -2879,10 +3198,10 @@ export default function ChatPage() {
 
       {/* Modal membri grup (cu sub-view adăugare) */}
       {showGroupMembers && activeGroupId && createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop-anim"
           style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}
           onClick={(e) => { if (e.target === e.currentTarget) { setShowGroupMembers(false); setShowAddMember(false); setEditingGroupName(false); setAddMemberSearch(''); setAddMemberResults([]); } }}>
-          <div className="w-full max-w-md rounded-2xl overflow-hidden"
+          <div className="w-full max-w-md rounded-2xl overflow-hidden modal-content-anim"
             style={{ backgroundColor: 'var(--bg-2)', border: '1px solid var(--border)' }}>
             {(() => {
               const g = groups.find((gr) => gr.id === activeGroupId);
@@ -3170,9 +3489,9 @@ export default function ChatPage() {
 
       {/* Modal propune investiție */}
       {showProposeModal && createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop-anim"
           style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}>
-          <div className="w-full max-w-sm rounded-2xl p-6"
+          <div className="w-full max-w-sm rounded-2xl p-6 modal-content-anim"
             style={{ backgroundColor: 'var(--bg-2)', border: '1px solid var(--border)' }}>
             <h3 className="text-base font-bold mb-1" style={{ color: 'var(--text)' }}>Propune investiție</h3>
             <p className="text-xs mb-4" style={{ color: 'var(--text-2)' }}>
@@ -3210,9 +3529,9 @@ export default function ChatPage() {
 
       {/* Modal raportare */}
       {showReport && createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop-anim"
           style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}>
-          <div className="w-full max-w-sm rounded-2xl p-6"
+          <div className="w-full max-w-sm rounded-2xl p-6 modal-content-anim"
             style={{ backgroundColor: 'var(--bg-2)', border: '1px solid var(--border)' }}>
             <h3 className="text-base font-bold mb-3" style={{ color: 'var(--text)' }}>Raportează conversația</h3>
             <textarea
@@ -3234,6 +3553,44 @@ export default function ChatPage() {
               </button>
             </div>
           </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Lightbox imagine — mărește imaginea în aplicație (click fundal / Esc / X închide) */}
+      {lightboxUrl && createPortal(
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(0,0,0,0.92)' }}
+          onClick={() => setLightboxUrl(null)}
+        >
+          <img
+            src={lightboxUrl}
+            alt="Imagine"
+            className="max-w-full max-h-full object-contain rounded-lg"
+            onClick={(e) => e.stopPropagation()}
+          />
+          {/* Descărcare */}
+          <a
+            href={lightboxUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="absolute top-4 right-16 flex items-center justify-center w-10 h-10 rounded-full"
+            style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: '#fff' }}
+            aria-label="Descarcă imaginea"
+          >
+            <Download size={20} />
+          </a>
+          {/* Închide */}
+          <button
+            onClick={() => setLightboxUrl(null)}
+            className="absolute top-4 right-4 flex items-center justify-center w-10 h-10 rounded-full"
+            style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: '#fff' }}
+            aria-label="Închide"
+          >
+            <X size={22} />
+          </button>
         </div>,
         document.body
       )}

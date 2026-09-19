@@ -4,7 +4,7 @@ import { authenticate } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { generalLimiter } from '../middleware/rateLimiter.js';
 import {
-  getNotifications, getUnreadCount, markAsRead, markAllAsRead,
+  getNotifications, getUnreadCount, getNotificationCounts, markAsRead, markAllAsRead,
   markReadByConversation, markReadByGroup, markReadByTicket,
 } from '../services/notifications.service.js';
 
@@ -37,6 +37,14 @@ router.get('/count', async (req: Request, res: Response) => {
   try {
     const count = await getUnreadCount(req.user!.sub);
     res.json({ count });
+  } catch (err) { handleError(err, res); }
+});
+
+// GET /notifications/counts — count-uri exacte pentru badge-uri (total, mesaje, per-conversație/grup/suport)
+router.get('/counts', async (req: Request, res: Response) => {
+  try {
+    const counts = await getNotificationCounts(req.user!.sub);
+    res.json(counts);
   } catch (err) { handleError(err, res); }
 });
 

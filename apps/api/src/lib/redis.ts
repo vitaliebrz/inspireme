@@ -23,6 +23,8 @@ export const REDIS_KEYS = {
   emailVerify: (token: string) => `verify:${token}`,
   giveawayParticipants: (giveawayId: string) => `giv:participants:${giveawayId}`,
   ideaView: (userId: string, ideaId: string) => `view:${userId}:${ideaId}`,
+  // Momentul în care adminul a văzut ultima dată logurile (badge erori nevăzute)
+  logsSeen: (userId: string) => `logs:seen:${userId}`,
 } as const;
 
 export const REDIS_TTL = {

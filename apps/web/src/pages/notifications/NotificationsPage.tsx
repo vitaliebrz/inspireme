@@ -123,7 +123,7 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
 // ── Pagina ────────────────────────────────────────────────────────────────
 export default function NotificationsPage() {
   const navigate = useNavigate();
-  const { notifications: ctxNotifications, markOne: ctxMarkOne, refresh } = useNotifications();
+  const { notifications: ctxNotifications, markOne: ctxMarkOne, refresh, unreadCount: ctxUnreadCount } = useNotifications();
   const [notifications, setNotifications] = useState<Notification[]>(ctxNotifications);
   const [loading, setLoading] = useState(ctxNotifications.length === 0);
   const [markingAll, setMarkingAll] = useState(false);
@@ -149,7 +149,10 @@ export default function NotificationsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const unreadCount = useMemo(() => notifications.filter((n) => !n.readAt).length, [notifications]);
+  // Numărul REAL de necitite vine din context (backend) — lista e plafonată la 50,
+  // deci nu s-ar putea calcula corect din ea. Fallback pe local dacă lipsește.
+  const localUnread = useMemo(() => notifications.filter((n) => !n.readAt).length, [notifications]);
+  const unreadCount = Math.max(ctxUnreadCount, localUnread);
   const filtered    = useMemo(() => notifications.filter((n) => matchesFilter(n, filter)), [notifications, filter]);
   const grouped     = useMemo(() => {
     const map = new Map<string, Notification[]>();
@@ -507,7 +510,7 @@ export default function NotificationsPage() {
                         <div className="rounded-full" style={{ width: 8, height: 8, backgroundColor: '#3b82f6' }} />
                       )}
                     </div>
-                    <NotifIcon type={notif.type} size={16} containerSize={36} />
+                    <NotifIcon type={notif.type} data={notif.data} size={16} containerSize={36} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm leading-snug" style={{ color: 'var(--text)', fontWeight: isUnread ? 600 : 500 }}>
                         {notif.title}

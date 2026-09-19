@@ -26,7 +26,7 @@ const navItems: NavItem[] = [
   { to: '/idea/new',      label: 'Postează idee', icon: <Lightbulb size={18} />, roles: ['ELEV'] },
   { to: '/chat',          label: 'Chat',          icon: <MessageSquare size={18} /> },
   { to: '/giveaways',     label: 'Giveaway-uri',  icon: <Gift size={18} /> },
-  { to: '/subscriptions', label: 'Abonament',     icon: <CreditCard size={18} /> },
+  { to: '/subscriptions', label: 'Abonament',     icon: <CreditCard size={18} />, roles: ['ELEV', 'ANTREPRENOR'] },
   { to: '/notifications', label: 'Notificări',    icon: <Bell size={18} /> },
   { to: '/profile/me',    label: 'Profilul meu',  icon: <User size={18} /> },
   { to: '/admin',         label: 'Admin',         icon: <ShieldCheck size={18} />, roles: ['ADMIN'] },
@@ -61,6 +61,29 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
 
   const postLimitReached = isFreeElev && ideaCount !== null && ideaCount >= 1;
 
+  // Rapoarte în așteptare (doar admin) — badge pe butonul „Admin".
+  // Poll la 60s + reîmprospătare la evenimentul „reports:changed" (după rezolvare).
+  const isAdmin = user?.role === 'ADMIN';
+  const [pendingReports, setPendingReports] = useState(0);
+
+  useEffect(() => {
+    if (!isAdmin) { setPendingReports(0); return; }
+    let cancelled = false;
+    const fetchCount = () => {
+      api.get<{ pending: number }>('/admin/reports/count')
+        .then(({ data }) => { if (!cancelled) setPendingReports(data.pending); })
+        .catch(() => { /* silențios */ });
+    };
+    fetchCount();
+    const id = window.setInterval(fetchCount, 60000);
+    window.addEventListener('reports:changed', fetchCount);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+      window.removeEventListener('reports:changed', fetchCount);
+    };
+  }, [isAdmin]);
+
   const initials = user
     ? (user.firstName?.[0] ?? user.email[0] ?? '?').toUpperCase() + (user.lastName?.[0] ?? '').toUpperCase()
     : '?';
@@ -74,7 +97,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
       {/* Overlay mobil */}
       {open && (
         <div
-          className="fixed inset-0 z-20 lg:hidden"
+          className="fixed inset-0 z-20 lg:hidden modal-backdrop-anim"
           style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
           onClick={onClose}
         />
@@ -154,7 +177,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
                         backgroundColor: 'var(--orange)', color: '#fff',
                       }}
                     >
-                      {unreadMessages > 9 ? '9+' : unreadMessages}
+                      {unreadMessages > 99 ? '99+' : unreadMessages}
                     </span>
                   )}
                   {item.to === '/notifications' && unreadCount > 0 && (
@@ -165,7 +188,18 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
                         backgroundColor: 'var(--orange)', color: '#fff',
                       }}
                     >
-                      {unreadCount > 9 ? '9+' : unreadCount}
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  )}
+                  {item.to === '/admin' && pendingReports > 0 && (
+                    <span
+                      className="flex items-center justify-center rounded-full text-[10px] font-bold"
+                      style={{
+                        minWidth: 18, height: 18, padding: '0 4px',
+                        backgroundColor: '#ef4444', color: '#fff',
+                      }}
+                    >
+                      {pendingReports > 9 ? '9+' : pendingReports}
                     </span>
                   )}
                 </NavLink>

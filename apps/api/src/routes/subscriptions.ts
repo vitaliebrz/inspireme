@@ -1,12 +1,13 @@
 import { Router, Request, Response, raw } from 'express';
 import { body } from 'express-validator';
 import { Role } from '@prisma/client';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { generalLimiter } from '../middleware/rateLimiter.js';
 import {
   createCheckoutSession, createBillingPortalSession,
   getSubscriptionStatus, handleStripeWebhook,
+  cancelSubscription,
 } from '../services/subscriptions.service.js';
 
 const router = Router();
@@ -46,11 +47,16 @@ router.get('/status', async (req: Request, res: Response) => {
   } catch (err) { handleError(err, res); }
 });
 
+// Abonamentele sunt doar pentru ELEV/ANTREPRENOR — adminii au deja acces Pro
+// din oficiu (setat direct în DB) și nu trebuie să ajungă niciodată la Stripe.
+const requireSubscriber = requireRole(Role.ELEV, Role.ANTREPRENOR);
+
 // ─────────────────────────────────────────────
 // POST /subscriptions/checkout — creare sesiune Stripe Checkout
 // ─────────────────────────────────────────────
 router.post(
   '/checkout',
+  requireSubscriber,
   [body('interval').isIn(['month', 'year'])],
   validate,
   async (req: Request, res: Response) => {
@@ -65,9 +71,19 @@ router.post(
 // ─────────────────────────────────────────────
 // POST /subscriptions/portal — portal billing Stripe
 // ─────────────────────────────────────────────
-router.post('/portal', async (req: Request, res: Response) => {
+router.post('/portal', requireSubscriber, async (req: Request, res: Response) => {
   try {
     const result = await createBillingPortalSession(req.user!.sub);
+    res.json(result);
+  } catch (err) { handleError(err, res); }
+});
+
+// ─────────────────────────────────────────────
+// POST /subscriptions/cancel — anulare abonament, imediată (nu la final de perioadă)
+// ─────────────────────────────────────────────
+router.post('/cancel', requireSubscriber, async (req: Request, res: Response) => {
+  try {
+    const result = await cancelSubscription(req.user!.sub);
     res.json(result);
   } catch (err) { handleError(err, res); }
 });

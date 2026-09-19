@@ -213,11 +213,11 @@ export default function FeedPage({ tab }: FeedPageProps) {
     <div>
       {/* Stats row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        {statsCards.map((s) => (
+        {statsCards.map((s, i) => (
           <div
             key={s.label}
-            className="flex items-center gap-3 p-4 rounded-2xl"
-            style={{ backgroundColor: 'var(--bg-2)', border: '1px solid var(--border)' }}
+            className="stagger-item flex items-center gap-3 p-4 rounded-2xl"
+            style={{ ['--i' as string]: i, backgroundColor: 'var(--bg-2)', border: '1px solid var(--border)' }}
           >
             <div className="p-2 rounded-xl" style={{ backgroundColor: 'rgba(246,166,35,0.12)', color: 'var(--orange)' }}>
               {s.icon}
@@ -300,7 +300,7 @@ export default function FeedPage({ tab }: FeedPageProps) {
       {activeTab === 'idei' ? (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {ideas.map((idea) => {
+            {ideas.map((idea, i) => {
               const ideaOwnerName = idea.user.profileElev
                 ? `${idea.user.profileElev.firstName} ${idea.user.profileElev.lastName}`
                 : 'Utilizator';
@@ -309,6 +309,7 @@ export default function FeedPage({ tab }: FeedPageProps) {
               <IdeaCard
                 key={idea.id}
                 idea={idea}
+                index={i}
                 onClick={() => navigate(`/idea/${idea.id}`)}
                 onViewProfile={() => navigate(`/profile/${idea.user.id}`)}
                 isConnected={!isSelf && connectedUsers.has(idea.user.id)}
@@ -334,7 +335,7 @@ export default function FeedPage({ tab }: FeedPageProps) {
       ) : (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {antreprenori.map((a) => {
+            {antreprenori.map((a, i) => {
               const antrName = a.profileAntreprenor
                 ? `${a.profileAntreprenor.firstName} ${a.profileAntreprenor.lastName}`
                 : 'Antreprenor';
@@ -343,6 +344,7 @@ export default function FeedPage({ tab }: FeedPageProps) {
               <AntreprenorCard
                 key={a.id}
                 antreprenor={a}
+                index={i}
                 onClick={() => navigate(`/profile/${a.id}`)}
                 onViewProfile={() => navigate(`/profile/${a.id}`)}
                 isConnected={!isSelf && connectedUsers.has(a.id)}
@@ -368,9 +370,9 @@ export default function FeedPage({ tab }: FeedPageProps) {
 
       {/* Modal cerere de contact */}
       {contactTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop-anim"
           style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}>
-          <div className="w-full max-w-sm rounded-2xl p-6"
+          <div className="w-full max-w-sm rounded-2xl p-6 modal-content-anim"
             style={{ backgroundColor: 'var(--bg-2)', border: '1px solid var(--border)' }}>
 
             <h3 className="text-base font-bold mb-1" style={{ color: 'var(--text)' }}>

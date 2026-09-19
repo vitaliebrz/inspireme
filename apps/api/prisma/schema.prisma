@@ -44,6 +44,7 @@ enum MessageType {
   TEXT
   PDF
   IMAGE
+  VIDEO
   EVENT
 }
 
@@ -238,10 +239,10 @@ model Idea {
   collaborations       Collaboration[]
   giveawayParticipations GiveawayParticipant[]
   investmentHistory    InvestmentHistory[]
-  reports              Report[]              @relation("IdeaReports")
   blockedContent       BlockedContent?
   originConversations  Conversation[]        @relation("ConvOriginIdea")
   contextMessages      Message[]             @relation("MessageContextIdea")
+  duplicateReports     Report[]              @relation("DuplicateOriginal")
 
   @@index([userId])
   @@index([status])
@@ -338,7 +339,6 @@ model Conversation {
   connectionRequest ConnectionRequest @relation(fields: [connectionRequestId], references: [id])
   originIdea        Idea?             @relation("ConvOriginIdea", fields: [originIdeaId], references: [id], onDelete: SetNull)
   messages          Message[]
-  reports           Report[]          @relation("ConversationReports")
 
   @@index([participantAId])
   @@index([participantBId])
@@ -521,6 +521,55 @@ model Notification {
 }
 
 // ─────────────────────────────────────────────
+// VIZUALIZĂRI IDEI (per-eveniment, pentru analitică pe zile)
+// Scrise/citite prin SQL raw. Un rând per view numărat (dedup Redis 1/oră deja aplicat).
+// ─────────────────────────────────────────────
+
+model IdeaView {
+  id        BigInt   @id @default(autoincrement())
+  ideaId    String   @map("idea_id")
+  viewerId  String?  @map("viewer_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([ideaId, createdAt])
+  @@map("idea_views")
+}
+
+// ─────────────────────────────────────────────
+// LOGURI PERSISTENTE (istoric pentru debugging în producție)
+// Scrise/citite prin SQL raw (nu necesită prisma generate). Nivel numeric pino:
+// 30=info, 40=warn, 50=error. Retenție prin job zilnic (info scurt, error lung).
+// ─────────────────────────────────────────────
+
+model LogEntry {
+  id           BigInt   @id @default(autoincrement())
+  level        Int
+  time         DateTime
+  msg          String?
+  reqId        String?  @map("req_id")
+  method       String?
+  path         String?
+  statusCode   Int?     @map("status_code")
+  userId       String?  @map("user_id")
+  ip           String?
+  userAgent    String?  @map("user_agent")
+  code         String?
+  errType      String?  @map("err_type")
+  errMessage   String?  @map("err_message")
+  errStack     String?  @map("err_stack")
+  responseTime Int?     @map("response_time")
+  env          String?
+  raw          Json?
+
+  @@index([time])
+  @@index([level, time])
+  @@index([reqId])
+  @@index([userId, time])
+  @@index([statusCode])
+  @@map("log_entries")
+}
+
+// ─────────────────────────────────────────────
 // BLOCARE
 // ─────────────────────────────────────────────
 
@@ -554,14 +603,20 @@ model Report {
   resolvedAt    DateTime?         @map("resolved_at")
   resolvedBy    String?           @map("resolved_by")
   createdAt     DateTime          @default(now()) @map("created_at")
+  // Ideea pe care reporterul o consideră originalul unui duplicat (doar contentType=IDEA).
+  // Prezența ei marchează raportul ca „raport de duplicat" — exclus din auto-blocare la 3
+  // rapoarte, fiindcă similaritatea e subiectivă și cere mereu decizia manuală a adminului.
+  relatedIdeaId String?           @map("related_idea_id")
 
   reporter     User  @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
-  idea         Idea? @relation("IdeaReports", fields: [contentId], references: [id], onDelete: Cascade, map: "fk_report_idea")
-  conversation Conversation? @relation("ConversationReports", fields: [contentId], references: [id], onDelete: Cascade, map: "fk_report_conversation")
+  relatedIdea  Idea? @relation("DuplicateOriginal", fields: [relatedIdeaId], references: [id], onDelete: SetNull)
+  // contentId e polimorf (idee / conversație / user) — fără FK către un singur tabel.
+  // Conținutul raportat se rezolvă pe baza contentType, nu printr-o relație.
 
   @@index([status])
   @@index([contentType, contentId])
   @@index([reporterId])
+  @@index([relatedIdeaId])
   @@map("reports")
 }
 
@@ -683,6 +738,10 @@ model DataExportRequest {
 // Full-text search vector pentru idei
 // Index creat prin migrație SQL custom:
 // CREATE INDEX ideas_fts ON ideas USING GIN(to_tsvector('romanian', title || ' ' || problem || ' ' || solution));
+
+// Similaritate titlu (detecție idei duplicate) — index creat prin migrație SQL custom:
+// CREATE EXTENSION IF NOT EXISTS pg_trgm;
+// CREATE INDEX ideas_title_trgm_idx ON ideas USING GIN (title gin_trgm_ops);
 
 // ─────────────────────────────────────────────
 // GRUPURI DE ELEVI

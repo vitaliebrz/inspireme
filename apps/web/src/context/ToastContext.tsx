@@ -4,10 +4,12 @@ type ToastType = 'success' | 'error' | 'info';
 interface ToastContextType { toast: (message: string, type?: ToastType) => void; }
 const ToastContext = createContext<ToastContextType | null>(null);
 
+// Fundal = tentă transparentă a culorii semantice peste --bg-2 (theme-aware,
+// spre deosebire de hex-urile opace de dinainte care ignorau light mode complet).
 const COLORS = {
-  success: { bg: '#1a2e1a', border: '#22c55e', icon: '#22c55e' },
-  error:   { bg: '#2e1a1a', border: '#ef4444', icon: '#ef4444' },
-  info:    { bg: '#1a1e2e', border: '#f6a623', icon: '#f6a623' },
+  success: { bg: 'rgba(34,197,94,0.12)', border: '#22c55e', icon: '#22c55e' },
+  error:   { bg: 'rgba(239,68,68,0.12)', border: '#ef4444', icon: '#ef4444' },
+  info:    { bg: 'rgba(246,166,35,0.12)', border: '#f6a623', icon: '#f6a623' },
 };
 
 const ICONS = {
@@ -43,6 +45,7 @@ function showToast(message: string, type: ToastType = 'info') {
 
   const el = document.createElement('div');
   el.setAttribute('role', 'alert');
+  el.className = 'toast-in';
   Object.assign(el.style, {
     display: 'flex',
     alignItems: 'flex-start',
@@ -51,7 +54,7 @@ function showToast(message: string, type: ToastType = 'info') {
     borderRadius: '14px',
     backgroundColor: c.bg,
     border: `1.5px solid ${c.border}`,
-    boxShadow: '0 8px 32px rgba(0,0,0,0.7)',
+    boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
     pointerEvents: 'all',
   });
 
@@ -70,7 +73,7 @@ function showToast(message: string, type: ToastType = 'info') {
     fontSize: '14px',
     fontWeight: '500',
     lineHeight: '1.4',
-    color: '#f0f2f8',
+    color: 'var(--text)',
     wordBreak: 'break-word',
     fontFamily: 'inherit',
   });
@@ -84,16 +87,35 @@ function showToast(message: string, type: ToastType = 'info') {
     border: 'none',
     padding: '2px',
     cursor: 'pointer',
-    color: '#8892a4',
+    color: 'var(--text-2)',
     flexShrink: '0',
     display: 'flex',
     marginTop: '1px',
   });
-  closeBtn.addEventListener('click', () => el.remove());
+
+  // Ieșire animată — schimbăm clasa și lăsăm keyframe-ul „toast-out" să ruleze
+  // înainte de a scoate elementul din DOM efectiv (altfel dispare instant).
+  // Plasă de siguranță cu setTimeout: sub prefers-reduced-motion, regula globală
+  // dezactivează animația explicit (animation:none) — fără ea, „animationend"
+  // nu s-ar mai declanșa niciodată și toast-ul ar rămâne blocat, invizibil, în DOM.
+  let dismissed = false;
+  const dismiss = () => {
+    if (dismissed) return;
+    dismissed = true;
+    clearTimeout(autoTimeout);
+    el.classList.remove('toast-in');
+    el.classList.add('toast-out');
+    let removed = false;
+    const finish = () => { if (!removed) { removed = true; el.remove(); } };
+    el.addEventListener('animationend', finish, { once: true });
+    setTimeout(finish, 250);
+  };
+
+  closeBtn.addEventListener('click', dismiss);
   el.appendChild(closeBtn);
 
   getContainer().appendChild(el);
-  setTimeout(() => el.remove(), 4500);
+  const autoTimeout = setTimeout(dismiss, 4500);
 }
 
 export function ToastProvider({ children }: { children: ReactNode }) {

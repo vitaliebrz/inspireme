@@ -73,10 +73,105 @@ h1, h2, h3 {
   background: var(--text-2);
 }
 
+/* ── Intrare eșalonată (stagger) pentru liste/grid-uri de carduri ──
+   Aplică .stagger-item pe fiecare element + style="--i: 0" / "--i: 1" ... — un
+   singur keyframe, delay calculat din indexul elementului. Plafonat la 12
+   elemente (peste asta, toate intră simultan cu ultimul delay) ca sesiunile
+   cu multe carduri să nu aștepte o coregrafie de secunde întregi. */
+@keyframes stagger-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.stagger-item {
+  animation: stagger-in 400ms var(--ease-out) backwards;
+  animation-delay: calc(min(var(--i, 0), 11) * 40ms);
+}
+
+/* ── Intrare/ieșire modal + backdrop (folosit de ConfirmModal și dialoguri ad-hoc) ──
+   Backdrop: fade simplu. Conținut: scale+fade, cu puțin translateY pentru un
+   sentiment de „aterizare", nu doar apariție. */
+@keyframes modal-backdrop-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes modal-content-in {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+.modal-backdrop-anim {
+  animation: modal-backdrop-in 200ms var(--ease-out) both;
+}
+.modal-content-anim {
+  animation: modal-content-in 250ms var(--ease-out) both;
+}
+
+/* Variantă pentru modalurile centrate prin transform (left-1/2 top-1/2
+   -translate-x-1/2 -translate-y-1/2) — păstrează centrarea de bază pe tot
+   parcursul animației, altfel scale/translateY din keyframe-ul de mai sus
+   ar înlocui transform-ul de centrare și modalul ar sări din poziție. */
+@keyframes modal-content-centered-in {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.96) translateY(8px); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1) translateY(0); }
+}
+.modal-content-centered-anim {
+  animation: modal-content-centered-in 250ms var(--ease-out) both;
+}
+
+/* ── Dropdown-uri (notificări, meniuri) — scale+fade dinspre punctul de ancorare ──
+   transform-origin se setează inline per-caz (top right / top left etc.) */
+@keyframes dropdown-in {
+  from { opacity: 0; transform: scale(0.96) translateY(-4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+.dropdown-anim {
+  animation: dropdown-in 180ms var(--ease-out) both;
+}
+
+/* ── Toast — intrare slide+fade dinspre dreapta, ieșire simetrică mai rapidă ── */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(24px) scale(0.97); }
+  to   { opacity: 1; transform: translateX(0) scale(1); }
+}
+@keyframes toast-out {
+  from { opacity: 1; transform: translateX(0) scale(1); }
+  to   { opacity: 0; transform: translateX(24px) scale(0.97); }
+}
+.toast-in    { animation: toast-in 300ms var(--ease-out) both; }
+.toast-out   { animation: toast-out 200ms var(--ease-in-out) both; }
+
+/* ── „Pop" pe badge-uri la schimbarea unei valori (ex. count necitite) ── */
+@keyframes badge-pop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.35); }
+  100% { transform: scale(1); }
+}
+.badge-pop {
+  animation: badge-pop 350ms var(--ease-out);
+}
+
+/* ── Feedback la apăsare (press) — completează hover-ul global de mai jos ── */
+@media (hover: hover) and (pointer: fine) {
+  button:not(:disabled):active,
+  a:not([aria-disabled="true"]):active,
+  [role="button"]:not([aria-disabled="true"]):active {
+    transform: scale(0.97);
+  }
+}
+
 /* ── Skeleton shimmer animație ── */
 @keyframes shimmer {
   0%   { background-position: -200% 0; }
   100% { background-position: 200% 0; }
+}
+
+/* Inel de progres upload (stil Telegram) — rotire pentru starea nedeterminată (procesare) */
+@keyframes upload-ring-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.upload-ring-spin {
+  animation: upload-ring-spin 0.9s linear infinite;
+  transform-origin: center;
 }
 
 .skeleton {
@@ -119,6 +214,31 @@ h1, h2, h3 {
     transition-property: color, background-color, border-color,
       outline-color, opacity !important;
     transition-duration: 150ms !important;
+  }
+
+  /* Animațiile de intrare (stagger, modal, dropdown, toast, badge) folosesc
+     keyframe-uri care pornesc din opacity:0 — o durată aproape-zero nu
+     garantează că browserul ajunge să picteze cadrul final înainte de a opri
+     animația, așa că elementul poate rămâne vizual „prins" la starea inițială.
+     Dezactivăm explicit animația și fixăm starea finală (vizibilă, nedeplasată). */
+  .stagger-item,
+  .modal-backdrop-anim,
+  .modal-content-anim,
+  .modal-content-centered-anim,
+  .dropdown-anim,
+  .toast-in,
+  .badge-pop {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+  .modal-content-centered-anim {
+    /* Excepție: acest element se centrează prin transform — nu-l elimina */
+    transform: translate(-50%, -50%) !important;
+  }
+  .toast-out {
+    animation: none !important;
+    opacity: 0 !important;
   }
 }
 

@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAuth } from './AuthContext';
+import { getAccessToken, refreshAccessToken } from '../lib/api';
 
 const API_URL = (import.meta as unknown as { env: Record<string, string> }).env['VITE_API_URL']
   ?? `${window.location.protocol}//${window.location.hostname}:4000`;
@@ -16,13 +17,14 @@ const SocketContext = createContext<SocketContextValue>({ socket: null, connecte
 // O singură conexiune socket pentru tot site-ul (chat + notificări),
 // deschisă cât timp userul e logat — nu câte una per pagină.
 export function SocketProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, authReady } = useAuth();
   const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
-    if (!user || !localStorage.getItem('accessToken')) {
+    // Așteptăm ca access token-ul (din memorie) să fie disponibil după boot (authReady)
+    if (!user || !authReady) {
       socketRef.current?.disconnect();
       socketRef.current = null;
       setSocket(null);
@@ -30,10 +32,14 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // auth ca funcție → la fiecare reconectare folosim token-ul curent din localStorage
-    // (access token expiră la 15 min — dacă e hardcodat, reconectarea după server restart eșuează)
+    // auth ca funcție → la fiecare (re)conectare folosim access token-ul CURENT din memorie.
+    // Dacă lipsește (ex. a expirat), îl reîmprospătăm prin cookie înainte de conectare.
     const s = io(API_URL, {
-      auth: (cb) => { cb({ token: localStorage.getItem('accessToken') ?? '' }); },
+      auth: async (cb) => {
+        let token = getAccessToken();
+        if (!token) { try { token = await refreshAccessToken(); } catch { token = null; } }
+        cb({ token: token ?? '' });
+      },
       withCredentials: true,
     });
     socketRef.current = s;
@@ -50,7 +56,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       s.disconnect();
       socketRef.current = null;
     };
-  }, [user?.id]);
+  }, [user?.id, authReady]);
 
   return (
     <SocketContext.Provider value={{ socket, connected }}>

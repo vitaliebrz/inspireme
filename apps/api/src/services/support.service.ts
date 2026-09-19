@@ -1,7 +1,7 @@
 import { NotificationType } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { sendSupportReplyEmail } from '../lib/email.js';
-import { emitToSupportRoom } from '../lib/socket.js';
+import { emitToSupportRoom, isUserInRoom } from '../lib/socket.js';
 import { createNotification } from './notifications.service.js';
 
 const MSG_SELECT = {
@@ -73,9 +73,11 @@ export async function sendUserMessage(userId: string, content: string) {
 
   emitToSupportRoom(ticket.id, msg);
 
-  // Notifică toți adminii că a sosit un mesaj nou de suport
+  // Notifică adminii că a sosit un mesaj nou de suport — dar NU pe cei care sunt
+  // deja în conversația de suport (o văd direct, prin emitToSupportRoom de mai sus).
   const admins = await prisma.user.findMany({ where: { role: 'ADMIN' }, select: { id: true } });
   for (const admin of admins) {
+    if (await isUserInRoom(`support:${ticket.id}`, admin.id)) continue;
     createNotification({
       userId: admin.id,
       type: NotificationType.SUPPORT_MESSAGE,
@@ -89,6 +91,26 @@ export async function sendUserMessage(userId: string, content: string) {
 }
 
 // ─── ADMIN ────────────────────────────────────
+
+// Adminul inițiază (sau redeschide) conversația de suport cu un utilizator anume.
+// Din partea userului va apărea ca „Suport InspireMe"; din partea adminului ca chat 1:1.
+export async function startTicketForUser(targetUserId: string) {
+  const u = await prisma.user.findUnique({
+    where: { id: targetUserId },
+    select: {
+      email: true, isDeleted: true, role: true,
+      profileElev: { select: { firstName: true, lastName: true } },
+      profileAntreprenor: { select: { firstName: true, lastName: true } },
+    },
+  });
+  if (!u || u.isDeleted) throw Object.assign(new Error('Utilizatorul nu există.'), { status: 404 });
+  if (u.role === 'ADMIN') throw Object.assign(new Error('Nu poți deschide suport cu un alt admin.'), { status: 400 });
+
+  const p = u.profileElev ?? u.profileAntreprenor;
+  const name = (p ? `${p.firstName} ${p.lastName}`.trim() : '') || u.email;
+  const ticket = await getOrCreateUserTicket(targetUserId, name, u.email);
+  return { ticketId: ticket.id };
+}
 
 export async function getAdminTickets() {
   return prisma.supportTicket.findMany({
@@ -135,8 +157,9 @@ export async function sendAdminMessage(ticketId: string, adminId: string, conten
 
   emitToSupportRoom(ticketId, msg);
 
-  // Notifică utilizatorul autentificat că a primit un răspuns la suport
-  if (ticket.userId) {
+  // Notifică utilizatorul că a primit un răspuns — dar NU dacă e deja în conversația
+  // de suport (o vede direct, prin emitToSupportRoom de mai sus).
+  if (ticket.userId && !(await isUserInRoom(`support:${ticketId}`, ticket.userId))) {
     createNotification({
       userId: ticket.userId,
       type: NotificationType.SUPPORT_MESSAGE,

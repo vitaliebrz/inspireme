@@ -4,8 +4,8 @@ import { MessageType, Plan } from '@prisma/client';
 import { authenticate } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { generalLimiter, uploadLimiter } from '../middleware/rateLimiter.js';
-import { uploadChatFile, validateMagicBytes } from '../middleware/upload.js';
-import { cloudinary } from '../lib/cloudinary.js';
+import { uploadChatFile, detectKind } from '../middleware/upload.js';
+import { uploadImage, uploadPdf, uploadVideo } from '../lib/cloudinary.js';
 import {
   createConnectionRequest, respondToConnectionRequest, getPendingRequests,
   getConversations, getConversationWith, getMessages, sendMessage,
@@ -197,29 +197,28 @@ router.post(
       const file = req.file;
       if (!file) { res.status(400).json({ error: 'Niciun fișier primit.' }); return; }
 
-      // Validare tip REAL prin magic bytes (nu doar mimetype)
-      if (!validateMagicBytes(file.buffer, file.mimetype)) {
+      // Tipul REAL se determină din magic bytes, nu din mimetype-ul raportat de
+      // browser (nesigur pentru mp4 de pe laptop/Android — adesea octet-stream).
+      const kind = detectKind(file.buffer);
+      if (!kind) {
         res.status(400).json({ error: 'Fișier invalid sau tip nepermis.' });
         return;
       }
 
-      const isImage = file.mimetype.startsWith('image/');
-      const uploaded = await cloudinary.uploader.upload(
-        `data:${file.mimetype};base64,${file.buffer.toString('base64')}`,
-        {
-          folder: 'chat',
-          resource_type: isImage ? 'image' : 'raw',
-          ...(isImage ? { transformation: [{ quality: 'auto', fetch_format: 'auto' }] } : {}),
-        },
-      );
+      const type = kind === 'image' ? MessageType.IMAGE : kind === 'video' ? MessageType.VIDEO : MessageType.PDF;
+      const url = kind === 'image'
+        ? await uploadImage(file.buffer, 'chat')
+        : kind === 'video'
+          ? await uploadVideo(file.buffer, 'chat')
+          : await uploadPdf(file.buffer, 'chat');
 
       const message = await sendMessage(
         req.params['id'] as string,
         req.user!.sub,
         req.user!.plan as Plan,
         file.originalname,
-        isImage ? MessageType.IMAGE : MessageType.PDF,
-        uploaded.secure_url,
+        type,
+        url,
       );
 
       res.status(201).json(message);
@@ -268,16 +267,18 @@ router.post(
     body('contentType').isIn(['IDEA', 'MESSAGE', 'USER']),
     body('contentId').isUUID(),
     body('reason').isString().trim().isLength({ min: 10, max: 500 }),
+    body('relatedIdeaId').optional().isUUID(),
   ],
   validate,
   async (req: Request, res: Response) => {
     try {
-      const { contentType, contentId, reason } = req.body as {
+      const { contentType, contentId, reason, relatedIdeaId } = req.body as {
         contentType: 'IDEA' | 'MESSAGE' | 'USER';
         contentId: string;
         reason: string;
+        relatedIdeaId?: string;
       };
-      const report = await reportContent(req.user!.sub, contentType, contentId, reason);
+      const report = await reportContent(req.user!.sub, contentType, contentId, reason, relatedIdeaId);
       res.status(201).json(report);
     } catch (err) { handleError(err, res); }
   },

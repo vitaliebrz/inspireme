@@ -274,6 +274,25 @@ export async function refreshTokens(refreshToken: string): Promise<TokenPair> {
   return generateTokenPair(publicUser);
 }
 
+// ─── Utilizator curent (citire fresh din DB) ───────────────────────
+// Spre deosebire de payload-ul JWT (care poate rămâne cu plan/rol vechi până la
+// următorul refresh de token), asta citește mereu starea curentă din DB — folosit
+// ca userul să vadă imediat un plan schimbat (ex. după checkout Stripe) fără logout.
+
+export async function getCurrentUser(userId: string): Promise<PublicUser> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      profileElev: { select: { firstName: true, lastName: true, avatarUrl: true } },
+      profileAntreprenor: { select: { firstName: true, lastName: true, avatarUrl: true } },
+    },
+  });
+  if (!user) throw new AppError(404, 'Utilizator negăsit.');
+
+  const profile = user.profileElev ?? user.profileAntreprenor ?? null;
+  return toPublicUser(user, profile);
+}
+
 // ─── Logout ───────────────────────────────────────────────────────
 
 export async function logout(userId: string): Promise<void> {

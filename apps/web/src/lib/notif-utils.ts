@@ -10,6 +10,8 @@ export interface Notification {
 
 export function getNotifLink(notif: Pick<Notification, 'type' | 'data'>): string | null {
   const d = notif.data;
+  // Raport de moderare → deschide direct raportul în panoul admin
+  if (d['reportId']) return `/admin/reports?report=${d['reportId']}`;
   if (notif.type === 'CONNECTION_REQUEST') return '/chat';
   if (notif.type === 'CONNECTION_ACCEPTED') return d['conversationId'] ? `/chat/${d['conversationId']}` : '/chat';
   if (notif.type === 'MESSAGE_NEW' && d['conversationId']) return `/chat/${d['conversationId']}`;
@@ -20,6 +22,7 @@ export function getNotifLink(notif: Pick<Notification, 'type' | 'data'>): string
   if (notif.type.startsWith('GIVEAWAY') && d['giveawayId']) return `/giveaways/${d['giveawayId']}`;
   if (notif.type.startsWith('COLLAB') && d['ideaId']) return `/idea/${d['ideaId']}`;
   if (notif.type === 'SUBSCRIPTION_EXPIRING') return '/subscriptions';
+  if (d['kind'] === 'plan_pro' || d['kind'] === 'plan_gratuit') return '/subscriptions';
   // Fallback generic pe baza datelor — acoperă notificările SYSTEM (ex. investiții) cu ideaId/giveawayId
   if (d['ideaId']) return `/idea/${d['ideaId']}`;
   if (d['giveawayId']) return `/giveaways/${d['giveawayId']}`;

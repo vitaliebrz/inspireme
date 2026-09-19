@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import {
   X, FileText, Loader2, ImageIcon, Globe, Lock,
   Lightbulb, Send, Clock, Eye, Check,
-  MessageSquare, Star, Crown, UploadCloud,
+  MessageSquare, Star, Crown, UploadCloud, AlertTriangle,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
@@ -34,6 +34,13 @@ function charColor(current: number, min: number) {
 
 function formatTime(d: Date) {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+interface SimilarIdea {
+  id: string;
+  title: string;
+  authorName: string;
+  similarity: number;
 }
 
 interface DraftState {
@@ -178,6 +185,7 @@ export default function IdeaNewPage() {
   const [pdf, setPdf] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [similarIdeas, setSimilarIdeas] = useState<SimilarIdea[] | null>(null);
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
   const [draftSaving, setDraftSaving] = useState(false);
   const [draftRestored, setDraftRestored] = useState(false);
@@ -259,21 +267,28 @@ export default function IdeaNewPage() {
     enabled: !loading,
   });
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
+  const submitIdea = async (ignoreSimilarWarning: boolean) => {
     setError('');
     setLoading(true);
 
     try {
-      const { data } = await api.post<{ id: string }>('/ideas', {
+      const { data } = await api.post<{ id?: string; needsConfirmation?: boolean; similarIdeas?: SimilarIdea[] }>('/ideas', {
         title,
         categories,
         problem,
         solution,
         tags,
         visibility,
+        ...(ignoreSimilarWarning ? { ignoreSimilarWarning: true } : {}),
       });
-      const ideaId = data.id;
+
+      if (data.needsConfirmation) {
+        setSimilarIdeas(data.similarIdeas ?? []);
+        setLoading(false);
+        return;
+      }
+
+      const ideaId = data.id!;
 
       if (images.length > 0) {
         try {
@@ -309,8 +324,82 @@ export default function IdeaNewPage() {
     }
   };
 
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    void submitIdea(false);
+  };
+
+  const handlePublishAnyway = () => {
+    setSimilarIdeas(null);
+    void submitIdea(true);
+  };
+
   return (
     <div>
+      {/* Modal avertisment idei similare — nu blochează, doar informează */}
+      {similarIdeas && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop-anim"
+          style={{ backgroundColor: 'rgba(0,0,0,0.6)' }}
+          onClick={() => setSimilarIdeas(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl p-5 modal-content-anim"
+            style={{ backgroundColor: 'var(--bg-2)', border: '1px solid var(--border)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 mb-3">
+              <div
+                className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+                style={{ backgroundColor: 'rgba(246,166,35,0.12)', color: 'var(--orange)' }}
+              >
+                <AlertTriangle size={18} />
+              </div>
+              <h3 className="font-bold text-base" style={{ color: 'var(--text)' }}>
+                Idei asemănătoare deja publicate
+              </h3>
+            </div>
+            <p className="text-sm mb-4" style={{ color: 'var(--text-2)' }}>
+              Titlul tău seamănă cu idei existente în feed. Verifică dacă nu cumva ideea ta a fost deja postată:
+            </p>
+            <div className="space-y-2 mb-4 max-h-60 overflow-y-auto">
+              {similarIdeas.map((s) => (
+                <Link
+                  key={s.id}
+                  to={`/idea/${s.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block p-3 rounded-xl hover:brightness-110 transition-all"
+                  style={{ backgroundColor: 'var(--bg-3)', border: '1px solid var(--border)' }}
+                >
+                  <p className="text-sm font-semibold truncate" style={{ color: 'var(--text)' }}>{s.title}</p>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-2)' }}>de {s.authorName}</p>
+                </Link>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setSimilarIdeas(null)}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold"
+                style={{ backgroundColor: 'var(--bg-3)', border: '1px solid var(--border)', color: 'var(--text-2)' }}
+              >
+                Revizuiesc titlul
+              </button>
+              <button
+                type="button"
+                onClick={handlePublishAnyway}
+                disabled={loading}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-60"
+                style={{ backgroundColor: 'var(--orange)', color: '#fff' }}
+              >
+                {loading ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Publică oricum'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Heading */}
       <div className="mb-5">
         <p className="text-xs font-semibold uppercase tracking-[1.2px] mb-2" style={{ color: 'var(--orange)' }}>

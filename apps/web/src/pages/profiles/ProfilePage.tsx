@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, FormEvent } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
-  MapPin, Globe, Crown, BookOpen, ArrowLeft,
+  Globe, Crown, BookOpen, ArrowLeft,
   Pencil, Check, X, Camera, Trophy, Loader2, Users,
   Eye, Handshake, Star, Lightbulb, BarChart2, Gift, MessageSquare,
   Plus, TrendingUp, Trash2, ChevronRight, Lock, Clock, Download,
@@ -1237,9 +1237,9 @@ export default function ProfilePage() {
       {/* ── Modal confirmare ștergere idee ── */}
       {ideaToDelete && (
         <>
-          <div className="fixed inset-0" style={{ zIndex: 50, backgroundColor: 'rgba(0,0,0,0.55)' }}
+          <div className="fixed inset-0 modal-backdrop-anim" style={{ zIndex: 50, backgroundColor: 'rgba(0,0,0,0.55)' }}
             onClick={() => !deleting && setIdeaToDelete(null)} />
-          <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm rounded-2xl p-6"
+          <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm rounded-2xl p-6 modal-content-centered-anim"
             style={{ zIndex: 51, backgroundColor: 'var(--bg-2)', border: '1px solid var(--border)', boxShadow: '0 24px 48px rgba(0,0,0,0.3)' }}>
             <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-4"
               style={{ backgroundColor: 'rgba(239,68,68,0.1)' }}>

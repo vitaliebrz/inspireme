@@ -3,10 +3,10 @@ import { body, param } from 'express-validator';
 import { authenticate } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { generalLimiter, uploadLimiter } from '../middleware/rateLimiter.js';
-import { uploadAvatar } from '../middleware/upload.js';
-import { cloudinary, deleteAsset, extractPublicId } from '../lib/cloudinary.js';
+import { uploadAvatar, uploadChatFile, detectKind } from '../middleware/upload.js';
+import { cloudinary, deleteAsset, extractPublicId, uploadImage, uploadPdf, uploadVideo } from '../lib/cloudinary.js';
 import { prisma } from '../lib/prisma.js';
-import { Plan } from '@prisma/client';
+import { MessageType, Plan } from '@prisma/client';
 import {
   createGroup,
   getGroups,
@@ -163,6 +163,50 @@ router.post(
         req.body['content'] as string,
         req.body['replyToId'] as string | undefined,
       );
+      res.status(201).json(message);
+    } catch (err) {
+      handleError(err, res);
+    }
+  },
+);
+
+// POST /groups/:id/upload — trimite poză, video sau PDF în grup
+router.post(
+  '/:id/upload',
+  uploadLimiter,
+  uploadChatFile.single('file'),
+  [param('id').isUUID()],
+  validate,
+  async (req: Request, res: Response) => {
+    try {
+      const file = req.file;
+      if (!file) { res.status(400).json({ error: 'Niciun fișier primit.' }); return; }
+
+      // Tipul REAL se determină din magic bytes, nu din mimetype-ul raportat de
+      // browser (nesigur pentru mp4 de pe laptop/Android — adesea octet-stream).
+      const kind = detectKind(file.buffer);
+      if (!kind) {
+        res.status(400).json({ error: 'Fișier invalid sau tip nepermis.' });
+        return;
+      }
+
+      const type = kind === 'image' ? MessageType.IMAGE : kind === 'video' ? MessageType.VIDEO : MessageType.PDF;
+      const url = kind === 'image'
+        ? await uploadImage(file.buffer, 'chat')
+        : kind === 'video'
+          ? await uploadVideo(file.buffer, 'chat')
+          : await uploadPdf(file.buffer, 'chat');
+
+      const message = await sendGroupMessage(
+        req.params['id'] as string,
+        req.user!.sub,
+        req.user!.plan as Plan,
+        file.originalname,
+        undefined,
+        type,
+        url,
+      );
+
       res.status(201).json(message);
     } catch (err) {
       handleError(err, res);

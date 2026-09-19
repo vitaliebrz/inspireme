@@ -45,6 +45,20 @@ export default function Topbar({ onMenuClick, sidebarOpen }: TopbarProps) {
   const navigate = useNavigate();
   const { notifications, unreadCount, markOne } = useNotifications();
 
+  // „Pop" pe badge doar când count-ul crește (notificare nouă) — nu la scădere
+  // (marcare ca citit), ca semnalul vizual să rămână legat de „a apărut ceva nou".
+  const prevUnreadRef = useRef(unreadCount);
+  const [badgePop, setBadgePop] = useState(false);
+  useEffect(() => {
+    if (unreadCount > prevUnreadRef.current) {
+      setBadgePop(true);
+      const t = setTimeout(() => setBadgePop(false), 350);
+      prevUnreadRef.current = unreadCount;
+      return () => clearTimeout(t);
+    }
+    prevUnreadRef.current = unreadCount;
+  }, [unreadCount]);
+
   const [search, setSearch] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -205,12 +219,13 @@ export default function Topbar({ onMenuClick, sidebarOpen }: TopbarProps) {
 
   const searchDropdown = showDropdown ? (
     <div
-      className="absolute top-full left-0 right-0 mt-1 rounded-2xl shadow-xl z-50 overflow-hidden"
+      className="absolute top-full left-0 right-0 mt-1 rounded-2xl shadow-xl z-50 overflow-hidden dropdown-anim"
       style={{
         backgroundColor: 'var(--bg-2)',
         border: '1px solid var(--border)',
         maxHeight: 360,
         overflowY: 'auto',
+        transformOrigin: 'top',
       }}
     >
       {searchLoading ? (
@@ -382,7 +397,7 @@ export default function Topbar({ onMenuClick, sidebarOpen }: TopbarProps) {
                 <Bell size={20} />
                 {unreadCount > 0 && (
                   <span
-                    className="absolute -top-0.5 -right-0.5 flex items-center justify-center rounded-full text-[10px] font-bold"
+                    className={badgePop ? 'badge-pop absolute -top-0.5 -right-0.5 flex items-center justify-center rounded-full text-[10px] font-bold' : 'absolute -top-0.5 -right-0.5 flex items-center justify-center rounded-full text-[10px] font-bold'}
                     style={{
                       minWidth: 18,
                       height: 18,
@@ -399,11 +414,12 @@ export default function Topbar({ onMenuClick, sidebarOpen }: TopbarProps) {
 
               {notifsOpen && (
                 <div
-                  className="absolute right-0 top-11 w-80 rounded-2xl shadow-xl z-50 flex flex-col"
+                  className="absolute right-0 top-11 w-80 rounded-2xl shadow-xl z-50 flex flex-col dropdown-anim"
                   style={{
                     backgroundColor: 'var(--bg-2)',
                     border: '1px solid var(--border)',
                     maxHeight: 420,
+                    transformOrigin: 'top right',
                   }}
                 >
                   <div
@@ -531,7 +547,7 @@ export default function Topbar({ onMenuClick, sidebarOpen }: TopbarProps) {
                                 <div className="rounded-full" style={{ width: 8, height: 8, backgroundColor: '#3b82f6' }} />
                               )}
                             </div>
-                            <NotifIcon type={notif.type} size={14} containerSize={30} />
+                            <NotifIcon type={notif.type} data={notif.data} size={14} containerSize={30} />
                             <div className="flex-1 min-w-0">
                               <p className="text-xs font-semibold leading-snug" style={{ color: 'var(--text)', fontWeight: isUnread ? 600 : 500 }}>
                                 {notif.title}
@@ -590,10 +606,11 @@ export default function Topbar({ onMenuClick, sidebarOpen }: TopbarProps) {
 
               {userMenuOpen && (
                 <div
-                  className="absolute right-0 top-11 w-52 rounded-2xl shadow-xl py-2 z-50"
+                  className="absolute right-0 top-11 w-52 rounded-2xl shadow-xl py-2 z-50 dropdown-anim"
                   style={{
                     backgroundColor: 'var(--bg-2)',
                     border: '1px solid var(--border)',
+                    transformOrigin: 'top right',
                   }}
                 >
                   <div className="px-4 py-2 border-b" style={{ borderColor: 'var(--border)' }}>

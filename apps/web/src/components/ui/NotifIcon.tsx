@@ -3,10 +3,19 @@ import type { LucideProps } from 'lucide-react';
 import {
   MessageSquare, UserPlus, Users, Star, Gift, Trophy,
   Handshake, CheckCircle2, RefreshCw, CreditCard, AlertTriangle,
-  Info, Bell, Target, Lightbulb, Headphones,
+  Info, Bell, Target, Lightbulb, Headphones, AlertCircle, Crown, Lock,
 } from 'lucide-react';
 
 interface Entry { bg: string; color: string; Icon: ComponentType<LucideProps> }
+
+// Rapoartele de moderare (notificare SYSTEM cu reportId) primesc un semn de
+// exclamare roșu, distinct de restul notificărilor de sistem.
+const REPORT_ENTRY: Entry = { bg: 'rgba(239,68,68,0.13)', color: '#ef4444', Icon: AlertCircle };
+
+// Notificările de schimbare de plan (SYSTEM cu data.kind) — distincte de restul
+// notificărilor generice de sistem, ca userul să recunoască dintr-o privire genul.
+const PLAN_PRO_ENTRY: Entry = { bg: 'rgba(246,166,35,0.15)', color: '#f6a623', Icon: Crown };
+const PLAN_GRATUIT_ENTRY: Entry = { bg: 'rgba(100,116,139,0.15)', color: '#64748b', Icon: Lock };
 
 const CONFIG: Record<string, Entry> = {
   MESSAGE_NEW:           { bg: 'rgba(59,130,246,0.13)',   color: '#3b82f6', Icon: MessageSquare },
@@ -30,14 +39,19 @@ const FALLBACK: Entry = { bg: 'rgba(100,116,139,0.13)', color: '#64748b', Icon: 
 
 interface Props {
   type: string;
+  /** Datele notificării — folosite pentru a distinge rapoartele (reportId) */
+  data?: Record<string, unknown> | null;
   /** Mărimea iconiței Lucide (default 16) */
   size?: number;
   /** Mărimea containerului rotunjit (default 36) */
   containerSize?: number;
 }
 
-export function NotifIcon({ type, size = 16, containerSize = 36 }: Props) {
-  const { bg, color, Icon } = CONFIG[type] ?? FALLBACK;
+export function NotifIcon({ type, data, size = 16, containerSize = 36 }: Props) {
+  const { bg, color, Icon } = data?.['reportId'] ? REPORT_ENTRY
+    : data?.['kind'] === 'plan_pro' ? PLAN_PRO_ENTRY
+    : data?.['kind'] === 'plan_gratuit' ? PLAN_GRATUIT_ENTRY
+    : (CONFIG[type] ?? FALLBACK);
   return (
     <div
       className="flex items-center justify-center rounded-xl shrink-0"

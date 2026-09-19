@@ -35,9 +35,11 @@ interface Props {
   onViewProfile?: () => void;
   onContact?: () => void;
   isConnected?: boolean;
+  /** Poziția în listă — folosită doar pentru intrarea eșalonată (stagger) la mount. */
+  index?: number;
 }
 
-export default function AntreprenorCard({ antreprenor, onClick, onViewProfile, onContact, isConnected }: Props) {
+export default function AntreprenorCard({ antreprenor, onClick, onViewProfile, onContact, isConnected, index }: Props) {
   const p = antreprenor.profileAntreprenor;
   if (!p) return null;
 
@@ -49,16 +51,25 @@ export default function AntreprenorCard({ antreprenor, onClick, onViewProfile, o
   return (
     <article
       onClick={onClick}
-      className="flex flex-col rounded-2xl p-4 cursor-pointer"
+      className={index !== undefined ? 'stagger-item flex flex-col rounded-2xl p-4 cursor-pointer' : 'flex flex-col rounded-2xl p-4 cursor-pointer'}
       style={{
-        transition: 'transform 150ms var(--ease-out)',
+        ['--i' as string]: index,
+        transition: 'transform 150ms var(--ease-out), box-shadow 150ms var(--ease-out)',
         backgroundColor: 'var(--bg-2)',
         border: '1px solid var(--border)',
         boxShadow: isPro ? '0 0 0 1.5px rgba(246,166,35,0.3)' : undefined,
         opacity: isRetras ? 0.65 : 1,
       }}
-      onMouseEnter={canHover ? (e) => { (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'; } : undefined}
-      onMouseLeave={canHover ? (e) => { (e.currentTarget as HTMLElement).style.transform = ''; } : undefined}
+      onMouseEnter={canHover ? (e) => {
+        (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)';
+        (e.currentTarget as HTMLElement).style.boxShadow = isPro
+          ? '0 0 0 1.5px rgba(246,166,35,0.3), 0 12px 24px rgba(0,0,0,0.16)'
+          : '0 12px 24px rgba(0,0,0,0.16)';
+      } : undefined}
+      onMouseLeave={canHover ? (e) => {
+        (e.currentTarget as HTMLElement).style.transform = '';
+        (e.currentTarget as HTMLElement).style.boxShadow = isPro ? '0 0 0 1.5px rgba(246,166,35,0.3)' : '';
+      } : undefined}
     >
       {/* Header */}
       <div className="flex items-start gap-3 mb-3">

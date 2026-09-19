@@ -2,7 +2,7 @@ import { Plan, ConnectionRequestStatus, MessageType, NotificationType } from '@p
 import { prisma } from '../lib/prisma.js';
 import { redis } from '../lib/redis.js';
 import { createNotification, sendConnectionRequestEmail } from './notifications.service.js';
-import { emitToUser, emitToConversation } from '../lib/socket.js';
+import { emitToUser, emitToConversation, isUserInRoom } from '../lib/socket.js';
 
 const MAX_MSG_GRATUIT_PER_DAY = 5;
 
@@ -425,18 +425,7 @@ export async function sendMessage(
   // livrarea în timp real nu depinde de retransmiterea payload-ului de la client.
   emitToConversation(conversationId, 'message:new', { conversationId, message });
 
-  // Notificare pentru celălalt participant — upsert (o singură notificare necitită per conversație)
-  // data.count ține numărul real de mesaje necitite din această conversație
   const receiverId = conv.participantAId === senderId ? conv.participantBId : conv.participantAId;
-  const existingNotif = await prisma.notification.findFirst({
-    where: {
-      userId: receiverId,
-      type: NotificationType.MESSAGE_NEW,
-      readAt: null,
-      data: { path: ['conversationId'], equals: conversationId },
-    },
-    select: { id: true, data: true },
-  });
 
   // Emitem message:new pe camera personală a receiverului — pentru sunet, badge și preview sidebar
   // Include suficiente date pentru a actualiza preview-ul conversației fără re-fetch
@@ -450,24 +439,32 @@ export async function sendMessage(
     },
   });
 
-  if (existingNotif) {
-    const prevData = (existingNotif.data ?? {}) as Record<string, string>;
-    const newCount = (parseInt(prevData['count'] ?? '1', 10) + 1).toString();
-    const updatedData = { ...prevData, count: newCount };
+  // Dacă destinatarul e deja în conversație, vede mesajul direct → nu creăm
+  // notificare persistentă (primește doar sunetul, prin message:new de mai sus).
+  const receiverInChat = await isUserInRoom(`conversation:${conversationId}`, receiverId);
+  if (!receiverInChat) {
+    // O notificare SEPARATĂ pentru fiecare mesaj (nu upsert) — ca să se vadă toate
+    // mesajele venite, fiecare cu textul lui: „Ion: salut", apoi „Ion: ce faci".
+    const sender = await prisma.user.findUnique({
+      where: { id: senderId },
+      select: {
+        profileElev: { select: { firstName: true, lastName: true } },
+        profileAntreprenor: { select: { firstName: true, lastName: true } },
+      },
+    });
+    const sp = sender?.profileElev ?? sender?.profileAntreprenor;
+    const senderName = sp ? `${sp.firstName} ${sp.lastName}`.trim() : 'Cineva';
+    const preview = type === MessageType.IMAGE ? `${senderName} a trimis o poză`
+      : type === MessageType.VIDEO ? `${senderName} a trimis un videoclip`
+      : type === MessageType.PDF ? `${senderName} a trimis un fișier`
+      : `${senderName}: ${content.length > 80 ? content.slice(0, 77) + '...' : content}`;
 
-    prisma.notification.update({
-      where: { id: existingNotif.id },
-      data: { createdAt: new Date(), data: updatedData },
-    })
-      .then((updated) => emitToUser(receiverId, 'notification:new', updated))
-      .catch(() => {});
-  } else {
     createNotification({
       userId: receiverId,
       type: NotificationType.MESSAGE_NEW,
-      title: 'Mesaj nou',
-      body: 'Ai primit un mesaj nou.',
-      data: { conversationId, senderId, count: '1' },
+      title: senderName,
+      body: preview,
+      data: { conversationId, senderId },
     }).catch(() => {});
   }
 
@@ -567,10 +564,26 @@ export async function reportContent(
   contentType: 'IDEA' | 'MESSAGE' | 'USER',
   contentId: string,
   reason: string,
+  relatedIdeaId?: string,
 ) {
-  // Evită rapoarte duplicate: un utilizator poate raporta același conținut o singură dată
+  // relatedIdeaId = ideea originală indicată de reporter, la un raport de duplicat.
+  // Valid doar pentru IDEA și doar dacă ideea originală chiar există.
+  if (relatedIdeaId) {
+    if (contentType !== 'IDEA') {
+      throw Object.assign(new Error('relatedIdeaId este valid doar pentru rapoarte de tip IDEA.'), { status: 400 });
+    }
+    if (relatedIdeaId === contentId) {
+      throw Object.assign(new Error('O idee nu poate fi raportată ca duplicat al ei înseși.'), { status: 400 });
+    }
+    const original = await prisma.idea.findUnique({ where: { id: relatedIdeaId }, select: { id: true } });
+    if (!original) throw Object.assign(new Error('Ideea originală indicată nu a fost găsită.'), { status: 404 });
+  }
+
+  // Evită rapoarte duplicate DESCHISE: un utilizator nu poate avea două rapoarte
+  // PENDING pe același conținut. După ce adminul rezolvă, poate raporta din nou
+  // (comportamentul s-a repetat).
   const existing = await prisma.report.findFirst({
-    where: { reporterId, contentType, contentId },
+    where: { reporterId, contentType, contentId, status: 'PENDING' },
     select: { id: true },
   });
   if (existing) return existing;
@@ -581,25 +594,74 @@ export async function reportContent(
       contentType,
       contentId,
       reason,
+      relatedIdeaId: relatedIdeaId ?? null,
       status: 'PENDING',
     },
     select: { id: true },
   });
 
-  // Auto-blocare la 3 utilizatori DIFERIȚI care raportează aceeași idee
-  // (numărăm reporteri distincți, nu total rapoarte — altfel o persoană ar putea abuza)
-  if (contentType === 'IDEA') {
-    const distinctReporters = await prisma.report.findMany({
-      where: { contentType, contentId, status: 'PENDING' },
-      distinct: ['reporterId'],
-      select: { reporterId: true },
+  // Notificăm toți adminii că a apărut un raport nou de moderat
+  const adminsToNotify = await prisma.user.findMany({
+    where: { role: 'ADMIN', isDeleted: false },
+    select: { id: true },
+  });
+  for (const admin of adminsToNotify) {
+    createNotification({
+      userId: admin.id,
+      type: NotificationType.SYSTEM,
+      title: relatedIdeaId ? 'Raport nou de idee duplicată' : 'Raport nou de moderat',
+      body: `A fost trimis un raport nou (${contentType}). Verifică în panoul de moderare.`,
+      data: { reportId: report.id, contentType, contentId },
+    }).catch(() => {});
+  }
+
+  // Numărăm reporteri DISTINCȚI (nu total rapoarte — altfel o persoană ar putea abuza).
+  // Rapoartele de duplicat (relatedIdeaId setat) NU intră la acest calcul — similaritatea
+  // e subiectivă, deci auto-blocarea la 3 rapoarte rămâne rezervată motivelor obișnuite
+  // (conținut inadecvat etc.); duplicatul se rezolvă mereu manual de admin.
+  const distinctReporters = await prisma.report.findMany({
+    where: { contentType, contentId, status: 'PENDING', relatedIdeaId: null },
+    distinct: ['reporterId'],
+    select: { reporterId: true },
+  });
+  const distinctCount = distinctReporters.length;
+
+  // Idee publică → auto-blocare la 3 utilizatori diferiți
+  if (contentType === 'IDEA' && distinctCount >= 3) {
+    await prisma.blockedContent.upsert({
+      where: { ideaId: contentId },
+      create: { ideaId: contentId, reason: 'Auto-blocat: 3+ rapoarte de la utilizatori diferiți' },
+      update: {},
     });
-    if (distinctReporters.length >= 3) {
-      await prisma.blockedContent.upsert({
-        where: { ideaId: contentId },
-        create: { ideaId: contentId, reason: 'Auto-blocat: 3+ rapoarte de la utilizatori diferiți' },
-        update: {},
+  }
+
+  // Utilizator (raportat din chat) → auto-suspendare la 3 utilizatori diferiți,
+  // în așteptarea deciziei finale a adminului. Protejează comunitatea de recidiviști.
+  if (contentType === 'USER' && distinctCount >= 3) {
+    const target = await prisma.user.findUnique({
+      where: { id: contentId },
+      select: { isSuspended: true, isDeleted: true },
+    });
+    if (target && !target.isSuspended && !target.isDeleted) {
+      await prisma.user.update({
+        where: { id: contentId },
+        data: {
+          isSuspended: true,
+          suspendedAt: new Date(),
+          suspendReason: 'Auto-suspendat: 3+ rapoarte de la utilizatori diferiți (în așteptarea deciziei adminului)',
+        },
       });
+      // Notificăm adminii pentru revizuire
+      const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
+      for (const admin of admins) {
+        createNotification({
+          userId: admin.id,
+          type: NotificationType.SYSTEM,
+          title: 'Utilizator auto-suspendat (rapoarte)',
+          body: 'Un utilizator a fost suspendat automat după 3 rapoarte de la utilizatori diferiți. Verifică în moderare.',
+          data: { userId: contentId },
+        }).catch(() => {});
+      }
     }
   }
 

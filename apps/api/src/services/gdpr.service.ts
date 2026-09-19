@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma.js';
 import { deleteUser } from './admin.service.js';
+import { getMyAnalytics } from './profiles.service.js';
 
 // ─────────────────────────────────────────────
 // EXPORT DATE (GDPR) — adună toate datele personale ale userului
@@ -21,6 +22,7 @@ export async function exportUserData(userId: string) {
     ideas, feedbackGiven, messagesSent, connectionRequests,
     giveawaysCreated, giveawayParticipations, collaborations,
     notifications, subscriptions, supportMessages,
+    reportsFiled, blockedUsers, parentalConsent,
   ] = await Promise.all([
     prisma.idea.findMany({
       where: { userId },
@@ -66,9 +68,22 @@ export async function exportUserData(userId: string) {
       where: { senderId: userId },
       select: { content: true, isAdmin: true, createdAt: true },
     }),
+    // Rapoartele depuse de user, userii blocați și consimțământul parental (dacă minor)
+    prisma.report.findMany({
+      where: { reporterId: userId },
+      select: { contentType: true, reason: true, description: true, status: true, createdAt: true },
+    }),
+    prisma.blockedUser.findMany({
+      where: { blockerId: userId },
+      select: { blockedId: true, createdAt: true },
+    }),
+    prisma.parentalConsent.findUnique({
+      where: { userId },
+      select: { parentEmail: true, confirmedAt: true, rejectedAt: true, expiresAt: true, createdAt: true },
+    }),
   ]);
 
-  return {
+  const base = {
     exportedAt: new Date().toISOString(),
     account: {
       id: user.id, email: user.email, role: user.role, plan: user.plan,
@@ -85,7 +100,20 @@ export async function exportUserData(userId: string) {
     notifications,
     subscriptions,
     supportMessages,
+    reportsFiled,
+    blockedUsers,
+    parentalConsent,
   };
+
+  // Date din funcțiile Pro — incluse DOAR dacă userul e pe planul Pro.
+  // Un user Gratuit nu are acces la analitică, deci nu apare în exportul lui.
+  if (user.plan === 'PRO') {
+    const analytics = await getMyAnalytics(userId);
+    const totalViews = ideas.reduce((sum, i) => sum + (i.viewCount ?? 0), 0);
+    return { ...base, pro: { analytics: { totalViews, weeklyViews: analytics.weeklyViews } } };
+  }
+
+  return base;
 }
 
 // ─────────────────────────────────────────────

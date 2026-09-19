@@ -57,12 +57,12 @@ export default function SupportModal({ open, onClose }: Props) {
   return (
     <>
       <div
-        className="fixed inset-0"
+        className="fixed inset-0 modal-backdrop-anim"
         style={{ zIndex: 200, backgroundColor: 'rgba(0,0,0,0.55)' }}
         onClick={handleClose}
       />
       <div
-        className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md rounded-2xl p-6"
+        className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md rounded-2xl p-6 modal-content-centered-anim"
         style={{ zIndex: 201, backgroundColor: 'var(--bg-2)', border: '1px solid var(--border)', boxShadow: '0 24px 48px rgba(0,0,0,0.3)' }}
       >
         <div className="flex items-center justify-between mb-5">

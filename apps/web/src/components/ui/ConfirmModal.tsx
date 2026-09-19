@@ -50,12 +50,12 @@ export default function ConfirmModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop-anim"
       style={{ backgroundColor: 'rgba(0,0,0,0.6)' }}
       onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
     >
       <div
-        className="w-full max-w-sm rounded-2xl shadow-2xl"
+        className="w-full max-w-sm rounded-2xl shadow-2xl modal-content-anim"
         style={{ backgroundColor: 'var(--bg-2)', border: '1px solid var(--border)' }}
       >
         <div className="flex items-start justify-between p-5 pb-3">

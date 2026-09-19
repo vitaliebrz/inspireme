@@ -12,6 +12,52 @@ import { deleteAsset } from '../lib/cloudinary.js';
 import { createNotification, sendIdeaPublishedEmail, sendIdeaFeedbackEmail } from './notifications.service.js';
 
 // ─────────────────────────────────────────────
+// DETECȚIE IDEI SIMILARE (pg_trgm)
+// ─────────────────────────────────────────────
+
+const SIMILARITY_THRESHOLD = 0.35;
+
+export interface SimilarIdea {
+  id: string;
+  title: string;
+  userId: string;
+  authorName: string;
+  similarity: number;
+}
+
+// Caută idei publice cu titlu similar via trigram similarity (extensie pg_trgm,
+// index ideas_title_trgm_idx). Folosit atât la postare (avertisment soft de
+// duplicat), cât și la raportarea unei idei ca duplicat (selectarea originalului).
+export async function findSimilarIdeas(title: string, excludeIdeaId?: string): Promise<SimilarIdea[]> {
+  const trimmed = title.trim();
+  if (trimmed.length < 5) return [];
+
+  const rows = await prisma.$queryRaw<{ id: string; title: string; userId: string; similarity: number }[]>(
+    Prisma.sql`
+      SELECT id, title, user_id AS "userId", similarity(title, ${trimmed}) AS similarity
+      FROM ideas
+      WHERE visibility = 'PUBLIC'
+        AND similarity(title, ${trimmed}) > ${SIMILARITY_THRESHOLD}
+        ${excludeIdeaId ? Prisma.sql`AND id != ${excludeIdeaId}` : Prisma.empty}
+      ORDER BY similarity DESC
+      LIMIT 5
+    `,
+  );
+  if (rows.length === 0) return [];
+
+  const authorIds = [...new Set(rows.map((r) => r.userId))];
+  const authors = await prisma.user.findMany({
+    where: { id: { in: authorIds } },
+    select: { id: true, profileElev: { select: { firstName: true, lastName: true } } },
+  });
+  const nameById = new Map(
+    authors.map((a) => [a.id, a.profileElev ? `${a.profileElev.firstName} ${a.profileElev.lastName}`.trim() : 'Utilizator']),
+  );
+
+  return rows.map((r) => ({ ...r, authorName: nameById.get(r.userId) ?? 'Utilizator' }));
+}
+
+// ─────────────────────────────────────────────
 // CREARE IDEE
 // ─────────────────────────────────────────────
 
@@ -223,6 +269,11 @@ export async function getIdeaById(ideaId: string, viewerId: string) {
         where: { id: ideaId },
         data: { viewCount: { increment: 1 } },
       }).catch((err) => console.error('[viewCount] increment failed:', err));
+      // Înregistrăm și evenimentul (pentru analitica pe zile) — SQL raw, non-blocant
+      prisma.$executeRawUnsafe(
+        `INSERT INTO idea_views (idea_id, viewer_id) VALUES ($1, $2)`,
+        ideaId, viewerId,
+      ).catch(() => {});
       counted = true;
     }
   }
@@ -261,10 +312,25 @@ interface UpdateIdeaInput {
 export async function updateIdea(input: UpdateIdeaInput) {
   const idea = await prisma.idea.findUnique({
     where: { id: input.ideaId },
-    select: { userId: true },
+    select: { userId: true, user: { select: { plan: true } } },
   });
   if (!idea) throw Object.assign(new Error('Idee negăsită.'), { status: 404 });
   if (idea.userId !== input.userId) throw Object.assign(new Error('Nu ai drept să modifici această idee.'), { status: 403 });
+
+  // Planul Gratuit permite o singură idee publică. Dacă userul a revenit la Gratuit
+  // (ex. anulare abonament) și ideile în plus au devenit private, nu le poate face
+  // publice din nou decât cu un abonament Pro activ.
+  if (input.visibility === IdeaVisibility.PUBLIC && idea.user.plan === Plan.GRATUIT) {
+    const otherPublicCount = await prisma.idea.count({
+      where: { userId: input.userId, visibility: IdeaVisibility.PUBLIC, id: { not: input.ideaId } },
+    });
+    if (otherPublicCount >= 1) {
+      throw Object.assign(
+        new Error('Cu planul Gratuit poți avea o singură idee publică. Treci la Pro ca să faci publice mai multe idei.'),
+        { status: 403 },
+      );
+    }
+  }
 
   const updateData: Prisma.IdeaUpdateInput = {};
   if (input.title !== undefined) updateData.title = input.title;

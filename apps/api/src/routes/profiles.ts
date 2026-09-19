@@ -8,7 +8,7 @@ import { uploadAvatar, compressToWebp } from '../middleware/upload.js';
 import { cloudinary, deleteAsset, extractPublicId } from '../lib/cloudinary.js';
 import {
   getMyProfile, updateElevProfile, updateAntreprenorProfile,
-  getPublicElevProfile, getPublicAntreprenorProfile,
+  getPublicElevProfile, getPublicAntreprenorProfile, getMyAnalytics,
 } from '../services/profiles.service.js';
 
 const router = Router();
@@ -40,6 +40,14 @@ router.get('/me', async (req: Request, res: Response) => {
     }
 
     res.json({ ...profile, targetRole: role, email: req.user!.email });
+  } catch (err) { handleError(err, res); }
+});
+
+// GET /profiles/me/analytics — vizualizări pe ultimele 7 zile (idei proprii)
+router.get('/me/analytics', async (req: Request, res: Response) => {
+  try {
+    const data = await getMyAnalytics(req.user!.sub);
+    res.json(data);
   } catch (err) { handleError(err, res); }
 });
 

@@ -29,3 +29,16 @@ export function emitToSupportRoom(ticketId: string, payload: unknown): void {
 export function removeUserFromRoom(userId: string, room: string): void {
   io?.in(`user:${userId}`).socketsLeave(room);
 }
+
+// Verifică dacă un utilizator are un socket activ într-o cameră (ex: privește chiar
+// acum acea conversație/grup/suport). Folosit ca să NU creăm notificare persistentă
+// când destinatarul e deja în chat — vede mesajul direct, nu vrea și o notificare.
+export async function isUserInRoom(room: string, userId: string): Promise<boolean> {
+  if (!io) return false;
+  try {
+    const sockets = await io.in(room).fetchSockets();
+    return sockets.some((s) => (s.data['user'] as { sub?: string } | null | undefined)?.sub === userId);
+  } catch {
+    return false;
+  }
+}
