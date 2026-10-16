@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { body, param } from 'express-validator';
 import { Role } from '@prisma/client';
 import { authenticate } from '../middleware/auth.js';
@@ -14,6 +14,12 @@ import {
 const router = Router();
 router.use(authenticate);
 router.use(generalLimiter);
+
+// Câmpuri opționale (nullable în DB) — golite din formular devin null
+const NULLABLE_PROFILE_FIELDS = [
+  'username', 'bio', 'bioMentor', 'city', 'school', 'class',
+  'company', 'position', 'domain', 'website', 'experienceYears',
+];
 
 type AppError = Error & { status?: number };
 function handleError(err: unknown, res: Response) {
@@ -56,22 +62,32 @@ router.get('/me/analytics', async (req: Request, res: Response) => {
 // ─────────────────────────────────────────────
 router.patch(
   '/me',
+  // Formularul trimite tot profilul, inclusiv câmpurile necompletate (null sau '').
+  // Un câmp opțional gol înseamnă „fără valoare" → null în DB, nu „date invalide".
+  (req: Request, _res: Response, next: NextFunction) => {
+    const b = req.body as Record<string, unknown> | undefined;
+    if (b) for (const k of NULLABLE_PROFILE_FIELDS) {
+      if (typeof b[k] === 'string' && (b[k] as string).trim() === '') b[k] = null;
+    }
+    next();
+  },
   [
     body('firstName').optional().isString().trim().isLength({ min: 1, max: 50 }),
     body('lastName').optional().isString().trim().isLength({ min: 1, max: 50 }),
-    body('username').optional({ nullable: true }).isString().trim()
+    body('username').optional({ values: 'null' }).isString().trim()
       .matches(/^[a-zA-Z0-9_]{3,30}$/).withMessage('Username: 3-30 caractere, doar litere/cifre/underscore.'),
-    body('bio').optional().isString().trim().isLength({ max: 500 }),
-    body('bioMentor').optional().isString().trim().isLength({ max: 1000 }),
-    body('city').optional().isString().trim().isLength({ max: 100 }),
-    body('school').optional().isString().trim().isLength({ max: 200 }),
-    body('class').optional().isString().trim().isLength({ max: 20 }),
+    body('bio').optional({ values: 'null' }).isString().trim().isLength({ max: 500 }),
+    body('bioMentor').optional({ values: 'null' }).isString().trim().isLength({ max: 1000 }),
+    body('city').optional({ values: 'null' }).isString().trim().isLength({ max: 100 }),
+    body('school').optional({ values: 'null' }).isString().trim().isLength({ max: 200 }),
+    body('class').optional({ values: 'null' }).isString().trim().isLength({ max: 20 }),
     body('interests').optional().isArray({ max: 10 }),
-    body('company').optional().isString().trim().isLength({ max: 200 }),
-    body('position').optional().isString().trim().isLength({ max: 100 }),
-    body('domain').optional().isString().trim().isLength({ max: 100 }),
-    body('website').optional().isURL(),
-    body('experienceYears').optional().isInt({ min: 0, max: 60 }),
+    body('company').optional({ values: 'null' }).isString().trim().isLength({ max: 200 }),
+    body('position').optional({ values: 'null' }).isString().trim().isLength({ max: 100 }),
+    body('domain').optional({ values: 'null' }).isString().trim().isLength({ max: 100 }),
+    body('website').optional({ values: 'null' }).isURL().withMessage('Website-ul nu este un link valid (ex. https://firma.ro).'),
+    // toInt: din input vine "5" (string), Prisma cere număr
+    body('experienceYears').optional({ values: 'null' }).isInt({ min: 0, max: 60 }).toInt(),
   ],
   validate,
   async (req: Request, res: Response) => {

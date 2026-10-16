@@ -14,7 +14,7 @@ import IdeaCard, { type IdeaCardData } from '../../components/feed/IdeaCard';
 import ConfirmModal from '../../components/ui/ConfirmModal';
 import { getCategoryIcon } from '../../lib/categories';
 
-type ApiError = { response?: { data?: { error?: string } } };
+type ApiError = { response?: { data?: { error?: string; fields?: { message: string }[] } } };
 
 const STATUS_COLORS: Record<string, string> = {
   PUBLICAT: '#8892a4',
@@ -206,7 +206,9 @@ export default function ProfilePage() {
       setProfile(data);
       setEditing(false);
     } catch (err) {
-      toast((err as ApiError).response?.data?.error ?? 'Eroare la salvare.', 'error');
+      // La 422 arătăm motivul concret (ex. „Website-ul nu este un link valid"), nu doar „Date invalide"
+      const data = (err as ApiError).response?.data;
+      toast(data?.fields?.[0]?.message ?? data?.error ?? 'Eroare la salvare.', 'error');
     } finally {
       setSaving(false);
     }

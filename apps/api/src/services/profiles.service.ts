@@ -78,10 +78,10 @@ export interface UpdateElevProfileInput {
   firstName?: string;
   lastName?: string;
   username?: string | null;
-  school?: string;
-  class?: string;
-  city?: string;
-  bio?: string;
+  school?: string | null;
+  class?: string | null;
+  city?: string | null;
+  bio?: string | null;
   interests?: string[];
   avatarUrl?: string;
 }
@@ -117,12 +117,12 @@ export interface UpdateAntreprenorProfileInput {
   firstName?: string;
   lastName?: string;
   username?: string | null;
-  company?: string;
-  position?: string;
-  domain?: string;
-  website?: string;
-  bioMentor?: string;
-  experienceYears?: number;
+  company?: string | null;
+  position?: string | null;
+  domain?: string | null;
+  website?: string | null;
+  bioMentor?: string | null;
+  experienceYears?: number | null;
   avatarUrl?: string;
 }
 
