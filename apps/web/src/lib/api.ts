@@ -59,14 +59,19 @@ api.interceptors.response.use(
     const original = error.config;
     if (error.response?.status === 401 && original && !original._retry) {
       original._retry = true;
+      // Cererea avea token → userul era logat și sesiunea a expirat. Fără token e o
+      // cerere anonimă (ex. vizitator pe /register) — nu-l scoatem de pe pagină.
+      const hadSession = Boolean(original.headers?.['Authorization']);
       try {
         const token = await refreshAccessToken();
         original.headers['Authorization'] = `Bearer ${token}`;
         return api(original);
       } catch {
         setAccessToken(null);
-        localStorage.removeItem('user');
-        if (window.location.pathname !== '/login') window.location.href = '/login';
+        if (hadSession) {
+          localStorage.removeItem('user');
+          if (window.location.pathname !== '/login') window.location.href = '/login';
+        }
       }
     }
     return Promise.reject(error);

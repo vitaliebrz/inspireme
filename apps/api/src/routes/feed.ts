@@ -7,10 +7,10 @@ import { getIdeasFeed, getAntreprenoriFeed, getFeedStats } from '../services/fee
 
 const router = Router();
 
-router.use(authenticate);
 router.use(generalLimiter);
 
-// GET /feed/stats
+// GET /feed/stats — PUBLIC: doar contoare agregate, afișate pe paginile de înregistrare
+// (vizitatorii nelogați). Trebuie să rămână înainte de router.use(authenticate).
 router.get('/stats', async (_req: Request, res: Response) => {
   try {
     const stats = await getFeedStats();
@@ -20,6 +20,8 @@ router.get('/stats', async (_req: Request, res: Response) => {
     res.status(500).json({ error: 'Eroare server' });
   }
 });
+
+router.use(authenticate);
 
 // GET /feed/ideas?category=TECH&cursor=xxx
 router.get(
