@@ -3,9 +3,10 @@ import { Routes, Route, NavLink, Link, useSearchParams, useNavigate } from 'reac
 import {
   BarChart2, Users, Flag, ShieldOff, Loader2, Search,
   CheckCircle, XCircle, AlertTriangle, Ban, Trash2, Tag, Plus, Pencil, X,
-  ScrollText, AlertCircle, Info, ChevronRight, MessageCircle,
+  ScrollText, AlertCircle, Info, ChevronRight, MessageCircle, Crown,
 } from 'lucide-react';
 import { api } from '../../lib/api';
+import { useToast } from '../../context/ToastContext';
 import ConfirmModal from '../../components/ui/ConfirmModal';
 import { invalidateCategoriesCache } from '../../lib/useCategories';
 import { ICON_MAP, searchIcons, resolveIcon } from '../../lib/categories';
@@ -99,6 +100,26 @@ function UsersPanel() {
   const [deleteModal, setDeleteModal] = useState<{ userId: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [contacting, setContacting] = useState<string | null>(null);
+  const [planModal, setPlanModal] = useState<{ userId: string; name: string; plan: 'PRO' | 'GRATUIT' } | null>(null);
+  const [changingPlan, setChangingPlan] = useState(false);
+  const { toast } = useToast();
+
+  // Acordă / retrage Pro manual (fără Stripe). Retragerea are aceleași consecințe ca o
+  // anulare: ideile publice în plus devin private, participările la giveaway se retrag.
+  const handlePlanConfirm = async () => {
+    if (!planModal) return;
+    setChangingPlan(true);
+    try {
+      await api.post(`/admin/users/${planModal.userId}/plan`, { plan: planModal.plan });
+      toast(planModal.plan === 'PRO' ? `${planModal.name} are acum planul Pro.` : `${planModal.name} a revenit la planul Gratuit.`, 'success');
+      setPlanModal(null);
+      load();
+    } catch (err) {
+      toast((err as ApiError).response?.data?.error ?? 'Nu s-a putut schimba planul.', 'error');
+    } finally {
+      setChangingPlan(false);
+    }
+  };
 
   // Adminul deschide chat 1:1 cu userul (din partea userului = chat de suport)
   const handleContact = async (userId: string) => {
@@ -174,6 +195,20 @@ function UsersPanel() {
         onConfirm={() => void handleDeleteConfirm()}
         onCancel={() => setDeleteModal(null)}
       />
+      <ConfirmModal
+        open={!!planModal}
+        title={planModal?.plan === 'PRO' ? 'Acordă planul Pro' : 'Retrage planul Pro'}
+        description={planModal
+          ? planModal.plan === 'PRO'
+            ? `${planModal.name} va primi planul Pro gratuit, fără plată și fără dată de expirare, până când îl retragi.`
+            : `${planModal.name} revine la planul Gratuit: rămâne publică doar prima idee (restul devin private), iar participările la giveaway-uri active se retrag. Utilizatorul primește un email.`
+          : undefined}
+        danger={planModal?.plan === 'GRATUIT'}
+        confirmLabel={planModal?.plan === 'PRO' ? 'Acordă Pro' : 'Retrage Pro'}
+        loading={changingPlan}
+        onConfirm={() => void handlePlanConfirm()}
+        onCancel={() => setPlanModal(null)}
+      />
 
       <div className="flex items-center gap-3 mb-4">
         <div className="flex-1 relative">
@@ -216,6 +251,19 @@ function UsersPanel() {
                   </p>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
+                  {u.role !== 'ADMIN' && (
+                    <button
+                      onClick={() => setPlanModal({ userId: u.id, name, plan: u.plan === 'PRO' ? 'GRATUIT' : 'PRO' })}
+                      disabled={changingPlan}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-medium disabled:opacity-50"
+                      style={u.plan === 'PRO'
+                        ? { backgroundColor: 'var(--bg-3)', color: 'var(--text-2)' }
+                        : { backgroundColor: 'rgba(168,85,247,0.12)', color: '#a855f7' }}
+                      title={u.plan === 'PRO' ? 'Retrage planul Pro' : 'Acordă planul Pro (fără plată)'}>
+                      <Crown size={12} />
+                      {u.plan === 'PRO' ? 'Retrage Pro' : 'Fă Pro'}
+                    </button>
+                  )}
                   {u.role !== 'ADMIN' && (
                     <button
                       onClick={() => void handleContact(u.id)}

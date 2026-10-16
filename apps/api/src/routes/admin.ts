@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { body, param, query } from 'express-validator';
-import { Role } from '@prisma/client';
+import { Role, Plan } from '@prisma/client';
+import { adminSetPlan } from '../services/subscriptions.service.js';
+import { reqLogger } from '../lib/logger.js';
 import { authenticate, requireAdmin } from '../middleware/auth.js';
 import { guessIconName } from '../lib/guessIcon.js';
 import { validate } from '../middleware/validate.js';
@@ -76,6 +78,22 @@ router.post(
   async (req: Request, res: Response) => {
     try {
       const result = await unsuspendUser(req.params['id'] as string);
+      res.json(result);
+    } catch (err) { handleError(err, res); }
+  },
+);
+
+// POST /admin/users/:id/plan — acordă / retrage Pro manual, fără Stripe
+router.post(
+  '/users/:id/plan',
+  [param('id').isUUID(), body('plan').isIn(Object.values(Plan)).withMessage('Plan invalid.')],
+  validate,
+  async (req: Request, res: Response) => {
+    try {
+      const { plan } = req.body as { plan: Plan };
+      const result = await adminSetPlan(req.params['id'] as string, plan);
+      // Audit: cine a schimbat planul cui (vizibil în /admin/logs)
+      reqLogger(req).info({ targetUserId: req.params['id'], plan, adminId: req.user!.sub }, `[Admin] Plan schimbat în ${plan}`);
       res.json(result);
     } catch (err) { handleError(err, res); }
   },

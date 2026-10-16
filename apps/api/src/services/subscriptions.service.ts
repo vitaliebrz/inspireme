@@ -207,6 +207,47 @@ export async function getSubscriptionStatus(userId: string) {
 }
 
 // ─────────────────────────────────────────────
+// SCHIMBARE PLAN DE CĂTRE ADMIN (fără Stripe)
+// Pro acordat manual (testeri, parteneri, premii) — fără abonament Stripe, deci fără
+// dată de expirare: rămâne Pro până când un admin îl retrage.
+// Retragerea aplică exact aceleași consecințe ca o anulare normală (applyGratuitDowngrade).
+// Refuzăm retragerea dacă userul are un abonament Stripe activ — ar plăti în continuare
+// fără să aibă Pro; acela se anulează din pagina lui de abonamente sau din Stripe.
+// ─────────────────────────────────────────────
+
+export async function adminSetPlan(userId: string, plan: Plan): Promise<{ plan: Plan }> {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { plan: true, role: true, isDeleted: true } });
+  if (!user || user.isDeleted) throw Object.assign(new Error('Utilizator inexistent.'), { status: 404 });
+  if (user.role === Role.ADMIN) throw Object.assign(new Error('Conturile de admin nu au plan.'), { status: 400 });
+  if (user.plan === plan) return { plan };
+
+  if (plan === Plan.PRO) {
+    await prisma.user.update({ where: { id: userId }, data: { plan: Plan.PRO } });
+    createNotification({
+      userId,
+      type: NotificationType.SYSTEM,
+      title: 'Ai primit planul Pro 🎉',
+      body: 'Un administrator ți-a activat planul Pro. Toate funcțiile Pro sunt disponibile acum.',
+      data: { kind: 'plan_pro' },
+    }).catch(() => {});
+    return { plan };
+  }
+
+  const { subscription } = await getSubscriptionStatus(userId);
+  if (subscription && !subscription.cancelledAt) {
+    throw Object.assign(
+      new Error('Utilizatorul are un abonament Stripe plătit și activ. Anulează-l întâi (din Stripe), altfel ar plăti fără să aibă Pro.'),
+      { status: 409 },
+    );
+  }
+  await applyGratuitDowngrade(userId, {
+    notificationTitle: 'Planul Pro a fost dezactivat',
+    emailReason: 'Planul Pro acordat de echipa InspireMe a fost dezactivat de un administrator.',
+  });
+  return { plan };
+}
+
+// ─────────────────────────────────────────────
 // REVOCARE ACCES PRO (rambursare / contestație de plată la bancă)
 // Previne abuzul: userul plătește, apoi obține banii înapoi (rambursare completă sau
 // chargeback la bancă), dar fără asta ar rămâne cu acces Pro până la finalul perioadei
