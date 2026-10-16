@@ -73,14 +73,15 @@ export const httpLogger = pinoHttp({
         method?: string; url?: string; query?: unknown;
         headers?: Record<string, string | undefined>;
         remoteAddress?: string;
-        raw?: { httpVersion?: string };
+        raw?: { httpVersion?: string; ip?: string };
       };
       const h = r.headers ?? {};
       return {
         method: r.method,
         url: safeUrl(r.url),
         query: redactBody(r.query),
-        ip: h['x-forwarded-for']?.split(',')[0]?.trim() ?? r.remoteAddress ?? null,
+        // req.ip din Express (respectă 'trust proxy') — nu X-Forwarded-For brut, falsificabil
+        ip: r.raw?.ip ?? r.remoteAddress ?? null,
         userAgent: h['user-agent'] ?? null,
         referer: h['referer'] ?? h['referrer'] ?? null,
         host: h['host'] ?? null,

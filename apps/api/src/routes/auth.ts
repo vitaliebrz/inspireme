@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { authLimiter } from '../middleware/rateLimiter.js';
+import { authLimiter, accountLimiter } from '../middleware/rateLimiter.js';
 import { authenticate } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import {
@@ -107,6 +107,7 @@ router.post(
 router.post(
   '/login',
   authLimiter,
+  accountLimiter,
   loginValidators,
   validate,
   async (req: Request, res: Response, next: NextFunction) => {
@@ -163,6 +164,7 @@ router.post(
 router.post(
   '/forgot-password',
   authLimiter,
+  accountLimiter,
   forgotPasswordValidators,
   validate,
   async (req: Request, res: Response, next: NextFunction) => {

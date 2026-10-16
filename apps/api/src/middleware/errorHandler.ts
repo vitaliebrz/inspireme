@@ -19,14 +19,13 @@ export function errorHandler(
   _next: NextFunction,
 ): void {
   const log = reqLogger(req);
-  const fwd = req.headers['x-forwarded-for'];
   // Context comun pentru corelarea erorii cu cererea (reqId vine din pino-http)
   const ctx = {
     method: req.method,
     path: req.originalUrl.split('?')[0],
     body: redactBody(req.body),
     userId: (req as Request & { user?: { sub?: string } }).user?.sub ?? null,
-    ip: (typeof fwd === 'string' ? fwd.split(',')[0]?.trim() : undefined) ?? req.socket?.remoteAddress ?? null,
+    ip: req.ip ?? req.socket?.remoteAddress ?? null,
     userAgent: req.headers['user-agent'] ?? null,
   };
 

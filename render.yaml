@@ -22,6 +22,9 @@ services:
       # Joburile zilnice rulează la 02:00 ora României, nu UTC
       - key: TZ
         value: Europe/Bucharest
+      # Client → proxy Netlify → load balancer Render → API: 2 proxy-uri de încredere
+      - key: TRUST_PROXY_HOPS
+        value: "2"
       - key: FRONTEND_URL
         sync: false
       - key: APP_URL

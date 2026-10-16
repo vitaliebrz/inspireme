@@ -25,6 +25,11 @@ import { remindPendingCollaborations } from './services/collaboration.service.js
 const app = express();
 const httpServer = createServer(app);
 
+// Câte proxy-uri de încredere stau în fața serverului (Netlify + Render = 2).
+// req.ip devine IP-ul adăugat de ultimul proxy de încredere, nu valoarea
+// falsificabilă trimisă de client în X-Forwarded-For. 0 = conexiune directă (dev).
+app.set('trust proxy', Number(process.env['TRUST_PROXY_HOPS'] ?? 0));
+
 const frontendUrl = process.env['FRONTEND_URL'] ?? 'http://localhost:5173';
 const allowedOrigins = process.env['NODE_ENV'] === 'production'
   ? [frontendUrl]

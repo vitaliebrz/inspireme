@@ -23,19 +23,31 @@ const uploadRatelimit = new Ratelimit({
   prefix: 'rl:upload',
 });
 
-function getIp(req: Request): string {
-  return (
-    (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ??
-    req.socket.remoteAddress ??
-    'unknown'
-  );
-}
+// Sliding window — 10 încercări / 15 min per CONT (email), independent de IP.
+// Protejează contra brute-force distribuit pe multe IP-uri (botnet, proxy-uri rotative).
+const accountRatelimit = new Ratelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(10, '15 m'),
+  prefix: 'rl:account',
+});
 
-function makeMiddleware(limiter: Ratelimit) {
+// req.ip respectă 'trust proxy' (TRUST_PROXY_HOPS în index.ts): ia IP-ul adăugat de
+// ultimul proxy de încredere, nu prima valoare din X-Forwarded-For — aceea e trimisă
+// de client și poate fi falsificată ca să ocolească limita.
+const ipKey = (req: Request): string => req.ip ?? req.socket.remoteAddress ?? 'unknown';
+
+const emailKey = (req: Request): string | null => {
+  const email = (req.body as { email?: unknown } | undefined)?.email;
+  return typeof email === 'string' && email.trim() ? email.trim().toLowerCase() : null;
+};
+
+function makeMiddleware(limiter: Ratelimit, getKey: (req: Request) => string | null = ipKey) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     if (process.env['NODE_ENV'] !== 'production') { next(); return; }
+    const key = getKey(req);
+    if (!key) { next(); return; }
     try {
-      const { success, limit, remaining, reset } = await limiter.limit(getIp(req));
+      const { success, limit, remaining, reset } = await limiter.limit(key);
       res.setHeader('X-RateLimit-Limit', limit);
       res.setHeader('X-RateLimit-Remaining', remaining);
       res.setHeader('X-RateLimit-Reset', reset);
@@ -59,3 +71,4 @@ function makeMiddleware(limiter: Ratelimit) {
 export const generalLimiter = makeMiddleware(generalRatelimit);
 export const authLimiter = makeMiddleware(authRatelimit);
 export const uploadLimiter = makeMiddleware(uploadRatelimit);
+export const accountLimiter = makeMiddleware(accountRatelimit, emailKey);
