@@ -5,6 +5,9 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  // Migrările ocolesc pooler-ul Neon: prin el, advisory lock-ul din `migrate deploy`
+  // expiră aleatoriu (P1002) și deploy-ul pe Render pică. Aplicația rămâne pe pooler.
+  directUrl = env("DIRECT_URL")
 }
 
 // ─────────────────────────────────────────────
