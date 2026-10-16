@@ -376,30 +376,30 @@ export default function ProfilePage() {
               </button>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <EditField label="Prenume" value={form['firstName'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, firstName: v }))} />
-              <EditField label="Nume" value={form['lastName'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, lastName: v }))} />
+              <EditField label="Prenume" required value={form['firstName'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, firstName: v }))} />
+              <EditField label="Nume" required value={form['lastName'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, lastName: v }))} />
             </div>
             <UsernameField value={form['username'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, username: v }))} />
             {isElev ? (
               <>
-                <EditField label="Școală" value={form['school'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, school: v }))} />
+                <EditField label="Școală" optional value={form['school'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, school: v }))} />
                 <div className="grid grid-cols-2 gap-3">
-                  <EditField label="Clasa" value={form['class'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, class: v }))} />
-                  <EditField label="Oraș" value={form['city'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, city: v }))} />
+                  <EditField label="Clasa" optional value={form['class'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, class: v }))} />
+                  <EditField label="Oraș" optional value={form['city'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, city: v }))} />
                 </div>
-                <EditField label="Bio" value={form['bio'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, bio: v }))} textarea />
+                <EditField label="Bio" optional value={form['bio'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, bio: v }))} textarea />
               </>
             ) : (
               <>
                 <div className="grid grid-cols-2 gap-3">
-                  <EditField label="Companie" value={form['company'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, company: v }))} />
-                  <EditField label="Poziție" value={form['position'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, position: v }))} />
+                  <EditField label="Companie" required value={form['company'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, company: v }))} />
+                  <EditField label="Poziție" required value={form['position'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, position: v }))} />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <EditField label="Domeniu" value={form['domain'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, domain: v }))} />
-                  <EditField label="Website" value={form['website'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, website: v }))} />
+                  <EditField label="Domeniu" required value={form['domain'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, domain: v }))} />
+                  <EditField label="Website" optional value={form['website'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, website: v }))} />
                 </div>
-                <EditField label="Despre mine (ca mentor)" value={form['bioMentor'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, bioMentor: v }))} textarea />
+                <EditField label="Despre mine (ca mentor)" optional value={form['bioMentor'] ?? ''} onChange={(v) => setForm((f) => ({ ...f, bioMentor: v }))} textarea />
               </>
             )}
             <div className="flex gap-3 pt-1">
@@ -1324,18 +1324,22 @@ function EmptyTabState({
 }
 
 function EditField({
-  label, value, onChange, textarea,
+  label, value, onChange, textarea, required = false, optional = false,
 }: {
   label: string; value: string; onChange: (v: string) => void; textarea?: boolean;
+  required?: boolean; optional?: boolean;
 }) {
   const cls = 'w-full px-3 py-2 rounded-xl text-sm outline-none';
   const sty = { backgroundColor: 'var(--bg-3)', border: '1px solid var(--border)', color: 'var(--text)' };
   return (
     <div>
-      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-2)' }}>{label}</label>
+      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-2)' }}>
+        {label}{required && <span className="ml-0.5" style={{ color: '#ef4444' }}>*</span>}
+        {optional && <span className="ml-1 font-normal opacity-70">(opțional)</span>}
+      </label>
       {textarea
-        ? <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={3} className={`${cls} resize-y`} style={sty} />
-        : <input type="text" value={value} onChange={(e) => onChange(e.target.value)} className={cls} style={sty} />
+        ? <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={3} required={required} className={`${cls} resize-y`} style={sty} />
+        : <input type="text" value={value} onChange={(e) => onChange(e.target.value)} required={required} className={cls} style={sty} />
       }
     </div>
   );
@@ -1345,7 +1349,9 @@ function UsernameField({ value, onChange }: { value: string; onChange: (v: strin
   const isValid = value === '' || /^[a-zA-Z0-9_]{3,30}$/.test(value);
   return (
     <div>
-      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-2)' }}>Username (opțional)</label>
+      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-2)' }}>
+        Username<span className="ml-1 font-normal opacity-70">(opțional)</span>
+      </label>
       <div className="flex items-center rounded-xl overflow-hidden"
         style={{ border: `1px solid ${!isValid ? '#ef4444' : 'var(--border)'}`, backgroundColor: 'var(--bg-3)' }}>
         <span className="px-3 py-2 text-sm font-medium shrink-0" style={{ color: 'var(--text-2)' }}>@</span>

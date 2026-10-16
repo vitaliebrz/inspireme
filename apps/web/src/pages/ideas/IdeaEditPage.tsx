@@ -336,7 +336,7 @@ export default function IdeaEditPage() {
                 {/* Titlu */}
                 <div>
                   <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--text)' }}>
-                    Titlu *
+                    Titlu<span className="ml-0.5" style={{ color: '#ef4444' }}>*</span>
                   </label>
                   <input type="text" value={title} onChange={(e) => setTitle(e.target.value)}
                     placeholder="Ex: RecycleReward — App de reciclare cu puncte"
@@ -353,7 +353,7 @@ export default function IdeaEditPage() {
                 {/* Categorie multi-select */}
                 <div className="max-w-full sm:max-w-sm">
                   <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--text)' }}>
-                    Categorie * <span className="font-normal text-xs" style={{ color: 'var(--text-2)' }}>(max 3)</span>
+                    Categorie<span className="ml-0.5" style={{ color: '#ef4444' }}>*</span> <span className="font-normal text-xs" style={{ color: 'var(--text-2)' }}>(max 3)</span>
                   </label>
                   <CategoryDropdown categories={categories} onChange={setCategories} />
                 </div>
@@ -361,7 +361,7 @@ export default function IdeaEditPage() {
                 {/* Problema rezolvată */}
                 <div>
                   <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--text)' }}>
-                    Problema rezolvată *
+                    Problema rezolvată<span className="ml-0.5" style={{ color: '#ef4444' }}>*</span>
                   </label>
                   <RichTextEditor value={problem} onChange={setProblem} minHeight={100}
                     placeholder="Ce problemă reală rezolvă ideea ta?" />
@@ -375,7 +375,7 @@ export default function IdeaEditPage() {
                 {/* Soluția propusă */}
                 <div>
                   <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--text)' }}>
-                    Soluția propusă *
+                    Soluția propusă<span className="ml-0.5" style={{ color: '#ef4444' }}>*</span>
                   </label>
                   <RichTextEditor value={solution} onChange={setSolution} minHeight={100}
                     placeholder="Cum rezolvi concret această problemă?" />
@@ -539,7 +539,7 @@ export default function IdeaEditPage() {
                 {/* Tags personalizate */}
                 <div>
                   <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--text)' }}>
-                    Tags personalizate
+                    Tags personalizate <span className="font-normal text-xs" style={{ color: 'var(--text-2)' }}>(opțional)</span>
                   </label>
                   <div className="flex gap-2 w-full">
                     <input type="text" value={tagInput}

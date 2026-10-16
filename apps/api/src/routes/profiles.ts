@@ -16,10 +16,16 @@ router.use(authenticate);
 router.use(generalLimiter);
 
 // Câmpuri opționale (nullable în DB) — golite din formular devin null
+// (company/position/domain NU sunt aici — obligatorii pentru antreprenor, ca la înregistrare)
 const NULLABLE_PROFILE_FIELDS = [
-  'username', 'bio', 'bioMentor', 'city', 'school', 'class',
-  'company', 'position', 'domain', 'website', 'experienceYears',
+  'username', 'bio', 'bioMentor', 'city', 'school', 'class', 'website', 'experienceYears',
 ];
+
+// Câmp obligatoriu dacă e trimis: lipsă (undefined) = nemodificat; null / '' = respins
+const requiredIfSent = (field: string, message: string, max: number) =>
+  body(field).optional()
+    .custom((v: unknown) => typeof v === 'string' && v.trim() !== '').withMessage(message)
+    .trim().isLength({ max });
 
 type AppError = Error & { status?: number };
 function handleError(err: unknown, res: Response) {
@@ -72,8 +78,8 @@ router.patch(
     next();
   },
   [
-    body('firstName').optional().isString().trim().isLength({ min: 1, max: 50 }),
-    body('lastName').optional().isString().trim().isLength({ min: 1, max: 50 }),
+    requiredIfSent('firstName', 'Prenumele este obligatoriu', 50),
+    requiredIfSent('lastName', 'Numele este obligatoriu', 50),
     body('username').optional({ values: 'null' }).isString().trim()
       .matches(/^[a-zA-Z0-9_]{3,30}$/).withMessage('Username: 3-30 caractere, doar litere/cifre/underscore.'),
     body('bio').optional({ values: 'null' }).isString().trim().isLength({ max: 500 }),
@@ -82,9 +88,9 @@ router.patch(
     body('school').optional({ values: 'null' }).isString().trim().isLength({ max: 200 }),
     body('class').optional({ values: 'null' }).isString().trim().isLength({ max: 20 }),
     body('interests').optional().isArray({ max: 10 }),
-    body('company').optional({ values: 'null' }).isString().trim().isLength({ max: 200 }),
-    body('position').optional({ values: 'null' }).isString().trim().isLength({ max: 100 }),
-    body('domain').optional({ values: 'null' }).isString().trim().isLength({ max: 100 }),
+    requiredIfSent('company', 'Numele companiei este obligatoriu', 200),
+    requiredIfSent('position', 'Poziția / rolul este obligatoriu', 100),
+    requiredIfSent('domain', 'Domeniul de activitate este obligatoriu', 100),
     body('website').optional({ values: 'null' }).isURL().withMessage('Website-ul nu este un link valid (ex. https://firma.ro).'),
     // toInt: din input vine "5" (string), Prisma cere număr
     body('experienceYears').optional({ values: 'null' }).isInt({ min: 0, max: 60 }).toInt(),

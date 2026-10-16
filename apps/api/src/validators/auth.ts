@@ -52,9 +52,12 @@ export const registerAntreprenorValidators = [
       return true;
     }),
   ...passwordRules,
-  body('company').optional().trim(),
-  body('position').optional().trim(),
-  body('domain').notEmpty().withMessage('Domeniul de activitate este obligatoriu'),
+  // Obligatorii și în UI (marcate cu *) — validare identică pe ambele părți
+  body('company').trim().notEmpty().withMessage('Numele companiei este obligatoriu')
+    .isLength({ max: 200 }),
+  body('position').trim().notEmpty().withMessage('Poziția / rolul este obligatoriu')
+    .isLength({ max: 100 }),
+  body('domain').trim().notEmpty().withMessage('Domeniul de activitate este obligatoriu'),
   body('website').optional({ checkFalsy: true }).isURL().withMessage('URL website invalid'),
   body('bioMentor').optional().trim().isLength({ max: 1000 }),
   body('confirmAdult')

@@ -317,6 +317,7 @@ export default function RegisterAntreprenorPage() {
                     value={customDomain}
                     onChange={setCustomDomain}
                     placeholder="Ex: Imobiliare"
+                    required
                   />
                 )}
 
@@ -324,7 +325,8 @@ export default function RegisterAntreprenorPage() {
                   label="Website companie"
                   value={website}
                   onChange={setWebsite}
-                  placeholder="https://compania-ta.ro (opțional)"
+                  placeholder="https://compania-ta.ro"
+                  optional
                 />
 
                 <div>
@@ -407,21 +409,23 @@ function StepItem({ num, label, active, done }: { num: number; label: string; ac
 }
 
 function Field({
-  label, value, onChange, placeholder, type = 'text', error = '', required = false,
+  label, value, onChange, placeholder, type = 'text', error = '', required = false, optional = false,
 }: {
   label: string; value: string; onChange: (v: string) => void;
-  placeholder?: string; type?: string; error?: string; required?: boolean;
+  placeholder?: string; type?: string; error?: string; required?: boolean; optional?: boolean;
 }) {
   return (
     <div>
       <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text)' }}>
         {label}{required && <span className="ml-0.5" style={{ color: '#ef4444' }}>*</span>}
+        {optional && <span className="ml-1" style={{ color: 'var(--text-2)' }}>(opțional)</span>}
       </label>
       <input
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
+        required={required}
         className="w-full px-4 py-2.5 rounded-xl text-sm outline-none"
         style={{
           backgroundColor: 'var(--bg-3)',

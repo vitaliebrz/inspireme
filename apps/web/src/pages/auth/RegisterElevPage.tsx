@@ -256,6 +256,7 @@ export default function RegisterElevPage() {
                     value={parentEmail}
                     onChange={setParentEmail}
                     placeholder="parinte@email.ro"
+                    required
                   />
                 )}
 
@@ -281,12 +282,13 @@ export default function RegisterElevPage() {
                   value={school}
                   onChange={setSchool}
                   placeholder="Colegiul Național..."
+                  optional
                 />
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text)' }}>
-                      Clasa
+                      Clasa <span style={{ color: 'var(--text-2)' }}>(opțional)</span>
                     </label>
                     <select
                       value={classVal}
@@ -300,7 +302,7 @@ export default function RegisterElevPage() {
                       ))}
                     </select>
                   </div>
-                  <Field label="Orașul" value={city} onChange={setCity} placeholder="Cluj-Napoca" />
+                  <Field label="Orașul" value={city} onChange={setCity} placeholder="Cluj-Napoca" optional />
                 </div>
 
                 <div>
@@ -321,7 +323,7 @@ export default function RegisterElevPage() {
 
                 <div>
                   <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text)' }}>
-                    Domenii de interes
+                    Domenii de interes <span style={{ color: 'var(--text-2)' }}>(opțional)</span>
                   </label>
                   <div className="flex flex-wrap gap-2">
                     {INTERESTS.map((i) => {
@@ -411,21 +413,23 @@ function StepItem({ num, label, active, done }: { num: number; label: string; ac
 }
 
 function Field({
-  label, value, onChange, placeholder, type = 'text', error = '', required = false,
+  label, value, onChange, placeholder, type = 'text', error = '', required = false, optional = false,
 }: {
   label: string; value: string; onChange: (v: string) => void;
-  placeholder?: string; type?: string; error?: string; required?: boolean;
+  placeholder?: string; type?: string; error?: string; required?: boolean; optional?: boolean;
 }) {
   return (
     <div>
       <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text)' }}>
         {label}{required && <span className="ml-0.5" style={{ color: '#ef4444' }}>*</span>}
+        {optional && <span className="ml-1" style={{ color: 'var(--text-2)' }}>(opțional)</span>}
       </label>
       <input
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
+        required={required}
         className="w-full px-4 py-2.5 rounded-xl text-sm outline-none"
         style={{
           backgroundColor: 'var(--bg-3)',
