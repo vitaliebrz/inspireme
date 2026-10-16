@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import AppLayout from './components/layout/AppLayout';
+import AppLoader from './components/AppLoader';
 import { initAudioContext } from './lib/sounds';
 
 // Auth pages — încărcate imediat (rute critice)
@@ -42,7 +43,11 @@ function PageLoader() {
 }
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, authReady } = useAuth();
+  // Așteaptă restaurarea sesiunii (refresh token → access token nou) înainte să
+  // decidă orice — altfel layout-ul (și fetch-urile lui: notificări, giveaway-uri
+  // etc.) ar porni cu access token-ul încă lipsă din memorie → 401 inutile.
+  if (!authReady) return <AppLoader />;
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />;
 }
 

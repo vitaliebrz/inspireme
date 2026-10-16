@@ -174,6 +174,33 @@ h1, h2, h3 {
   transform-origin: center;
 }
 
+/* ── Loader de boot (AppLoader) — logo „respirând" + inel orbital ──
+   Apare doar când verificarea sesiunii (refresh token) durează vizibil,
+   ex. conexiune lentă. Întârziat 400ms în component ca să nu clipească
+   pe conexiuni rapide. */
+@keyframes app-loader-breathe {
+  0%, 100% { transform: scale(1);     opacity: 1;   }
+  50%      { transform: scale(1.06);  opacity: 0.85; }
+}
+@keyframes app-loader-orbit {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes app-loader-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.app-loader {
+  animation: app-loader-fade-in 300ms var(--ease-out) both;
+}
+.app-loader-mark {
+  animation: app-loader-breathe 1.8s var(--ease-in-out) infinite;
+}
+.app-loader-ring {
+  animation: app-loader-orbit 1.1s linear infinite;
+  transform-origin: center;
+}
+
 .skeleton {
   background: linear-gradient(
     90deg,
