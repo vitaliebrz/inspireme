@@ -30,7 +30,27 @@ const FROM = useMailtrap
   ? `InspireMe <${GMAIL_USER}>`
   : null;
 
-// Resend (fallback când nu e Nodemailer configurat)
+// Brevo — API HTTPS (merge pe Render Free, care blochează porturile SMTP).
+// Nu cere domeniu propriu: expeditorul e o adresă verificată în Brevo (ex. Gmail).
+const BREVO_API_KEY = process.env['BREVO_API_KEY'];
+const BREVO_SENDER_EMAIL = process.env['BREVO_SENDER_EMAIL'];
+const useBrevo = !!(BREVO_API_KEY && BREVO_SENDER_EMAIL);
+
+async function sendViaBrevo({ to, subject, html }: SendEmailOptions): Promise<void> {
+  const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: { 'api-key': BREVO_API_KEY!, 'Content-Type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({
+      sender: { name: 'InspireMe', email: BREVO_SENDER_EMAIL },
+      to: [{ email: to }],
+      subject,
+      htmlContent: html,
+    }),
+  });
+  if (!res.ok) throw new Error(`Brevo ${res.status}: ${await res.text()}`);
+}
+
+// Resend (fallback când nu e Nodemailer/Brevo configurat)
 const resend = new Resend(process.env['RESEND_API_KEY']);
 const RESEND_FROM = process.env['RESEND_FROM'] ?? 'InspireMe <onboarding@resend.dev>';
 
@@ -44,6 +64,10 @@ export async function sendEmail({ to, subject, html }: SendEmailOptions): Promis
   try {
     if (transport && FROM) {
       await transport.sendMail({ from: FROM, to, subject, html });
+      return;
+    }
+    if (useBrevo) {
+      await sendViaBrevo({ to, subject, html });
       return;
     }
     // SDK-ul Resend NU aruncă la eșec — întoarce { error }. Fără verificarea asta,
