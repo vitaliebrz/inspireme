@@ -233,8 +233,10 @@ export default function IdeaNewPage() {
   const isValid =
     title.trim().length >= 5 &&
     categories.length > 0 &&
-    problemText.length >= 20 &&
-    solutionText.length >= 20;
+    // Fără minim/maxim de lungime — fiecare își descrie ideea cât de pe larg vrea;
+    // doar să nu fie goale (câmpuri obligatorii)
+    problemText.length > 0 &&
+    solutionText.length > 0;
 
   const handleAddTag = () => {
     const t = tagInput.trim().toLowerCase();
@@ -315,9 +317,9 @@ export default function IdeaNewPage() {
       toast('Ideea a fost publicată cu succes!', 'success');
       navigate(`/idea/${ideaId}`);
     } catch (err: unknown) {
-      const msg =
-        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
-        'A apărut o eroare. Încearcă din nou.';
+      // La 422 arătăm motivul concret (primul câmp invalid), nu doar „Date invalide"
+      const data = (err as { response?: { data?: { error?: string; fields?: { message: string }[] } } })?.response?.data;
+      const msg = data?.fields?.[0]?.message ?? data?.error ?? 'A apărut o eroare. Încearcă din nou.';
       setError(msg);
     } finally {
       setLoading(false);
@@ -489,12 +491,6 @@ export default function IdeaNewPage() {
                     minHeight={100}
                     placeholder="Ce problemă reală rezolvă ideea ta?"
                   />
-                  <p
-                    className="text-xs mt-1 flex items-center justify-end gap-1"
-                    style={{ color: charColor(problemText.length, 20) }}>
-                    {problemText.length >= 20 && <Check size={11} />}
-                    {problemText.length}/500
-                  </p>
                 </div>
 
                 {/* Soluția propusă */}
@@ -508,12 +504,6 @@ export default function IdeaNewPage() {
                     minHeight={100}
                     placeholder="Cum rezolvi concret această problemă?"
                   />
-                  <p
-                    className="text-xs mt-1 flex items-center justify-end gap-1"
-                    style={{ color: charColor(solutionText.length, 20) }}>
-                    {solutionText.length >= 20 && <Check size={11} />}
-                    {solutionText.length}/500
-                  </p>
                 </div>
 
                 {/* Progres cuvinte — informațional, nu blochează publicarea */}

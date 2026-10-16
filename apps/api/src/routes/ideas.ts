@@ -18,6 +18,12 @@ const router = Router();
 router.use(authenticate);
 router.use(generalLimiter);
 
+// Problema/soluția nu au limită de lungime — fiecare își descrie ideea cât de pe larg vrea
+// (plafonul real e limita de 1MB pe body). Cerem doar să conțină text: editorul rich text
+// trimite „<p></p>" pentru un câmp gol, deci verificăm fără tag-uri.
+const hasText = (v: unknown): boolean =>
+  typeof v === 'string' && v.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim().length > 0;
+
 // Tipul de eroare cu status opțional
 type AppError = Error & { status?: number };
 
@@ -70,8 +76,8 @@ router.post(
     body('categories').isArray({ min: 1 }).withMessage('Cel puțin o categorie este obligatorie.')
       .custom((v: unknown[]) => v.every((c) => typeof c === 'string' && c.length >= 2 && c.length <= 50))
       .withMessage('Categorie invalidă.'),
-    body('problem').isString().trim().isLength({ min: 20, max: 5000 }).withMessage('Problema trebuie să aibă 20-5000 caractere.'),
-    body('solution').isString().trim().isLength({ min: 20, max: 5000 }).withMessage('Soluția trebuie să aibă 20-5000 caractere.'),
+    body('problem').custom(hasText).withMessage('Descrie problema pe care o rezolvă ideea.'),
+    body('solution').custom(hasText).withMessage('Descrie soluția propusă.'),
     body('targetAudience').optional().isString().trim().isLength({ max: 500 }),
     body('tags').optional().isArray({ max: 5 }),
     body('visibility').optional().isIn(Object.values(IdeaVisibility)),
@@ -210,8 +216,8 @@ router.patch(
     body('categories').optional().isArray({ min: 1 })
       .custom((v: unknown[]) => v.every((c) => typeof c === 'string' && c.length >= 2 && c.length <= 50))
       .withMessage('Categorie invalidă.'),
-    body('problem').optional().isString().trim().isLength({ min: 20, max: 5000 }),
-    body('solution').optional().isString().trim().isLength({ min: 20, max: 5000 }),
+    body('problem').optional().custom(hasText).withMessage('Descrie problema pe care o rezolvă ideea.'),
+    body('solution').optional().custom(hasText).withMessage('Descrie soluția propusă.'),
     body('targetAudience').optional().isString().trim().isLength({ max: 500 }),
     body('tags').optional().isArray({ max: 5 }),
     body('visibility').optional().isIn(Object.values(IdeaVisibility)),
