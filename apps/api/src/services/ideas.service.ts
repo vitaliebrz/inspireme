@@ -74,6 +74,19 @@ interface CreateIdeaInput {
   visibility?: IdeaVisibility;
 }
 
+// Numără cuvintele din câmpurile rich text (HTML). Tag-urile devin spațiu — altfel
+// „<p>a</p><p>b</p>" ar conta ca un singur cuvânt, iar o idee ar putea fi respinsă
+// greșit la condiția de participare giveaway (min. 100 cuvinte). Aceeași regulă ca
+// în editorul din frontend (IdeaNewPage/IdeaEditPage), ca cele două să coincidă.
+export function countWords(...fields: string[]): number {
+  return fields
+    .join(' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&[^;\s]+;/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean).length;
+}
+
 export async function createIdea(input: CreateIdeaInput) {
   const { userId, userPlan } = input;
 
@@ -85,11 +98,7 @@ export async function createIdea(input: CreateIdeaInput) {
     }
   }
 
-  const wordCount = [input.problem, input.solution, input.targetAudience ?? '']
-    .join(' ')
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean).length;
+  const wordCount = countWords(input.problem, input.solution, input.targetAudience ?? '');
 
   const idea = await prisma.idea.create({
     data: {
@@ -349,12 +358,11 @@ export async function updateIdea(input: UpdateIdeaInput) {
       select: { problem: true, solution: true, targetAudience: true },
     });
     if (existing) {
-      const wordCount = [
+      updateData.wordCount = countWords(
         input.problem ?? existing.problem,
         input.solution ?? existing.solution,
         input.targetAudience ?? existing.targetAudience ?? '',
-      ].join(' ').trim().split(/\s+/).filter(Boolean).length;
-      updateData.wordCount = wordCount;
+      );
     }
   }
 

@@ -93,7 +93,7 @@ async function main(): Promise<void> {
       tags: ['eco', 'mobile', 'gamification', 'carbon'],
       visibility: IdeaVisibility.PUBLIC,
       planAtPost: Plan.GRATUIT,
-      wordCount: 120,
+      wordCount: 70, // = countWords(problem, solution, targetAudience) — sub pragul de 100 pentru giveaway
     },
   });
   console.log('Idee demo creată:', idea.title);

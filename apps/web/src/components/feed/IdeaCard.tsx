@@ -3,6 +3,16 @@ import { getIconForCategoryName } from '../../lib/useCategories';
 
 const canHover = typeof window !== 'undefined' && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
 
+// `problem` vine din editorul rich text (HTML, ex. <p>…</p>); ideile vechi au text simplu.
+// Pentru preview vrem doar textul: spațiu între blocuri (altfel paragrafele se lipesc),
+// entitățile decodate (&amp; → &). DOMParser nu execută scripturi și nu încarcă resurse.
+function htmlToText(html: string): string {
+  if (!html.includes('<')) return html;
+  const spaced = html.replace(/<\/(p|li|h[1-6]|div|blockquote)>|<br\s*\/?>/gi, ' ');
+  const text = new DOMParser().parseFromString(spaced, 'text/html').body.textContent ?? '';
+  return text.replace(/\s+/g, ' ').trim();
+}
+
 const STATUS_COLORS: Record<string, string> = {
   PUBLICAT: '#8892a4',
   CONTACTAT: '#f6a623',
@@ -149,7 +159,7 @@ export default function IdeaCard({ idea, onClick, onViewProfile, onContact, isCo
 
         {/* Problemă scurtă */}
         <p className="text-xs leading-relaxed line-clamp-2 flex-1" style={{ color: 'var(--text-2)' }}>
-          {idea.problem}
+          {htmlToText(idea.problem)}
         </p>
 
         {/* Footer: autor + stats */}

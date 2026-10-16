@@ -17,7 +17,7 @@ const MAX_IMAGES_PRO = 10;
 const MIN_WORDS = 100;
 
 function stripHtml(html: string): string {
-  return html.replace(/<[^>]+>/g, ' ').replace(/&[^;]+;/g, ' ').replace(/\s+/g, ' ').trim();
+  return html.replace(/<[^>]+>/g, ' ').replace(/&[^;\s]+;/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 function countWords(html: string) {
