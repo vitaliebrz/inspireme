@@ -323,7 +323,9 @@ export async function forgotPassword(email: string): Promise<void> {
     redis.set(REDIS_KEYS.passwordResetByUser(user.id), tokenHash, { ex: REDIS_TTL.passwordReset }),
   ]);
 
-  await sendPasswordResetEmail(user.email, resetLink);
+  // Eșecul e deja logat în sendEmail. Nu-l propagăm: un 500 doar pentru conturile
+  // existente ar dezvălui ce emailuri sunt înregistrate.
+  await sendPasswordResetEmail(user.email, resetLink).catch(() => {});
 }
 
 // ─── Validate Reset Token ─────────────────────────────────────────

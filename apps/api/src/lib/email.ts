@@ -1,5 +1,6 @@
 import { Resend } from 'resend';
 import nodemailer from 'nodemailer';
+import { logger } from './logger.js';
 
 const MAILTRAP_HOST = process.env['MAILTRAP_HOST'];
 const MAILTRAP_USER = process.env['MAILTRAP_USER'];
@@ -40,10 +41,19 @@ interface SendEmailOptions {
 }
 
 export async function sendEmail({ to, subject, html }: SendEmailOptions): Promise<void> {
-  if (transport && FROM) {
-    await transport.sendMail({ from: FROM, to, subject, html });
-  } else {
-    await resend.emails.send({ from: RESEND_FROM, to, subject, html });
+  try {
+    if (transport && FROM) {
+      await transport.sendMail({ from: FROM, to, subject, html });
+      return;
+    }
+    // SDK-ul Resend NU aruncă la eșec — întoarce { error }. Fără verificarea asta,
+    // un expeditor neverificat sau o cheie invalidă eșuau complet silențios.
+    const { error } = await resend.emails.send({ from: RESEND_FROM, to, subject, html });
+    if (error) throw new Error(`Resend: ${error.message}`);
+  } catch (err) {
+    // Majoritatea apelanților fac .catch(() => {}) — logăm aici ca eșecul să fie vizibil
+    logger.error({ err, subject }, `[Email] Trimitere eșuată: ${subject}`);
+    throw err;
   }
 }
 
