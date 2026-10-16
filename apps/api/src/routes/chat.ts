@@ -4,7 +4,7 @@ import { MessageType, Plan } from '@prisma/client';
 import { authenticate } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { generalLimiter, uploadLimiter } from '../middleware/rateLimiter.js';
-import { uploadChatFile, detectKind } from '../middleware/upload.js';
+import { uploadChatFile, detectKind, originalFilename } from '../middleware/upload.js';
 import { uploadImage, uploadPdf, uploadVideo } from '../lib/cloudinary.js';
 import {
   createConnectionRequest, respondToConnectionRequest, getPendingRequests,
@@ -216,7 +216,7 @@ router.post(
         req.params['id'] as string,
         req.user!.sub,
         req.user!.plan as Plan,
-        file.originalname,
+        originalFilename(file),
         type,
         url,
       );

@@ -3,6 +3,12 @@ import { Request } from 'express';
 import sharp from 'sharp';
 import heicConvert from 'heic-convert';
 
+// Multer 1.x decodează numele fișierului ca latin1 → diacriticele se strică
+// („Plan_afacerii_ăîș.pdf" devine „Plan_afacerii_Ä…"). Numele e folosit la descărcare.
+export function originalFilename(file: Express.Multer.File): string {
+  return Buffer.from(file.originalname, 'latin1').toString('utf8');
+}
+
 // Detectare HEIC prin magic bytes (ftyp la offset 4)
 function isHeicBuffer(buffer: Buffer): boolean {
   if (buffer.length < 12) return false;

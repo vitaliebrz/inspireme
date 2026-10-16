@@ -3,7 +3,7 @@ import { body, param } from 'express-validator';
 import { authenticate } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { generalLimiter, uploadLimiter } from '../middleware/rateLimiter.js';
-import { uploadAvatar, uploadChatFile, detectKind } from '../middleware/upload.js';
+import { uploadAvatar, uploadChatFile, detectKind, originalFilename } from '../middleware/upload.js';
 import { cloudinary, deleteAsset, extractPublicId, uploadImage, uploadPdf, uploadVideo } from '../lib/cloudinary.js';
 import { prisma } from '../lib/prisma.js';
 import { MessageType, Plan } from '@prisma/client';
@@ -201,7 +201,7 @@ router.post(
         req.params['id'] as string,
         req.user!.sub,
         req.user!.plan as Plan,
-        file.originalname,
+        originalFilename(file),
         undefined,
         type,
         url,

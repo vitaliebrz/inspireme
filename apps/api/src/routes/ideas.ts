@@ -5,7 +5,7 @@ import { authenticate } from '../middleware/auth.js';
 import { requireElev } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { generalLimiter, uploadLimiter } from '../middleware/rateLimiter.js';
-import { uploadIdeaImages, uploadIdeaPdf, compressToWebp, validateMagicBytes } from '../middleware/upload.js';
+import { uploadIdeaImages, uploadIdeaPdf, compressToWebp, validateMagicBytes, originalFilename } from '../middleware/upload.js';
 import { cloudinary, deleteAsset } from '../lib/cloudinary.js';
 import {
   createIdea, getIdeaById, updateIdea, deleteIdea,
@@ -174,7 +174,7 @@ router.post(
         userId: req.user!.sub,
         url: uploaded.secure_url,
         publicId: uploaded.public_id,
-        filename: file.originalname,
+        filename: originalFilename(file),
         size: file.size,
       });
 

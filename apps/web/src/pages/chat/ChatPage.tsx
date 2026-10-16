@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Send, Paperclip, Flag, ArrowLeft, Loader2, MessageSquare, Handshake, TrendingUp, Search, X, MoreVertical, BellOff, Bell, Check, CheckCheck, Users, UserPlus, Pencil, SquarePen, CornerUpLeft, ArrowDown, Camera, HeadphonesIcon, Lightbulb, Download } from 'lucide-react';
 import { api } from '../../lib/api';
+import { downloadFile } from '../../lib/download';
 import { playMessageSound } from '../../lib/sounds';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -306,10 +307,31 @@ function renderFileMessage(
       </div>
     );
   }
+  return fileUrl ? <ChatFileLink url={fileUrl} filename={label} /> : <span>📎 {label}</span>;
+}
+
+// Document din chat — descărcat cu numele original (label = numele fișierului trimis)
+function ChatFileLink({ url, filename }: { url: string; filename: string }) {
+  const [state, setState] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [errorMsg, setErrorMsg] = useState('');
   return (
-    <a href={fileUrl ?? '#'} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 underline">
-      📎 {label}
-    </a>
+    <span className="flex flex-col">
+      <button
+        type="button"
+        onClick={() => {
+          setState('loading');
+          downloadFile(url, filename)
+            .then(() => setState('idle'))
+            .catch((err: Error) => { setErrorMsg(err.message); setState('error'); });
+        }}
+        disabled={state === 'loading'}
+        aria-label={`Descarcă ${filename}`}
+        className="flex items-center gap-2 underline text-left disabled:opacity-60"
+      >
+        {state === 'loading' ? <Loader2 size={14} className="animate-spin shrink-0" /> : '📎'} {filename}
+      </button>
+      {state === 'error' && <span className="text-xs mt-1" style={{ color: '#ef4444' }}>{errorMsg}</span>}
+    </span>
   );
 }
 

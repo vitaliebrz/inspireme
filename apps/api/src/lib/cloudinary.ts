@@ -20,6 +20,10 @@ export async function uploadImage(buffer: Buffer, folder: string): Promise<strin
   });
 }
 
+// ATENȚIE: NU adăuga extensia .pdf în public_id. Contul Cloudinary are livrarea PDF
+// blocată (setare de securitate implicită) → URL-urile .pdf răspund 401. Fără extensie,
+// fișierul e servit ca octet-stream; frontendul (lib/download.ts) îl salvează cu numele
+// și tipul corect.
 export async function uploadPdf(buffer: Buffer, folder: string): Promise<string> {
   return new Promise((resolve, reject) => {
     cloudinary.uploader

@@ -9,6 +9,7 @@ import {
   Download, Flag, Search,
 } from 'lucide-react';
 import { api } from '../../lib/api';
+import { downloadFile } from '../../lib/download';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import ConfirmModal from '../../components/ui/ConfirmModal';
@@ -519,6 +520,18 @@ export default function IdeaDetailPage() {
   const [error, setError] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [downloadingPdfId, setDownloadingPdfId] = useState<string | null>(null);
+
+  const handleDownload = async (pdf: { id: string; url: string; filename: string }) => {
+    setDownloadingPdfId(pdf.id);
+    try {
+      await downloadFile(pdf.url, pdf.filename);
+    } catch (err) {
+      toast((err as Error).message, 'error');
+    } finally {
+      setDownloadingPdfId(null);
+    }
+  };
   const [connectLoading, setConnectLoading] = useState(false);
   const [connectSent, setConnectSent] = useState(false);
   const [connectError, setConnectError] = useState('');
@@ -878,19 +891,22 @@ export default function IdeaDetailPage() {
                         {formatBytes(pdf.size)}
                       </p>
                     </div>
-                    <a
-                      href={pdf.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium shrink-0 hover:opacity-80 transition-opacity"
+                    <button
+                      type="button"
+                      onClick={() => void handleDownload(pdf)}
+                      disabled={downloadingPdfId === pdf.id}
+                      aria-label={`Descarcă ${pdf.filename}`}
+                      className="flex items-center gap-1.5 px-3 py-1.5 min-h-11 rounded-xl text-xs font-medium shrink-0 hover:opacity-80 transition-opacity disabled:opacity-60"
                       style={{
                         backgroundColor: 'var(--bg-4)',
                         color: 'var(--text)',
                         border: '1px solid var(--border)',
                       }}
                     >
-                      <Download size={13} /> Descarcă
-                    </a>
+                      {downloadingPdfId === pdf.id
+                        ? <Loader2 size={13} className="animate-spin" />
+                        : <Download size={13} />} Descarcă
+                    </button>
                   </div>
                 ))}
               </div>
