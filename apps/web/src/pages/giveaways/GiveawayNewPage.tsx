@@ -1,8 +1,7 @@
-import { useState, useEffect, FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, Check, Trophy, Users, Eye } from 'lucide-react';
 import { api } from '../../lib/api';
-import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 
 type ApiError = { response?: { data?: { error?: string } } };
@@ -97,8 +96,6 @@ function GiveawayPreviewCard({
   const investDisplay = investmentDescription.trim() || 'Ce primește câștigătorul';
   const descDisplay = description.trim() || 'Descrierea giveaway-ului va apărea aici...';
   const companyDisplay = company || 'Compania ta';
-
-  const badgeLabel = hasExpired ? 'EXPIRAT' : isLive ? 'LIVE' : 'PREVIEW';
 
   return (
     <div className="rounded-2xl p-5 relative"
@@ -202,7 +199,6 @@ function GiveawayPreviewCard({
 
 export default function GiveawayNewPage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
   const { toast } = useToast();
 
   const [title, setTitle] = useState('');

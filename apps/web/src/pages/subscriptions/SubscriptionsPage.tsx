@@ -303,7 +303,7 @@ export default function SubscriptionsPage() {
 
   return (
     <div className="max-w-3xl mx-auto">
-      {showWelcomeTour && user && user.role !== 'ADMIN' && (
+      {showWelcomeTour && user && (
         <ProWelcomeTour role={user.role} onClose={() => setShowWelcomeTour(false)} />
       )}
 

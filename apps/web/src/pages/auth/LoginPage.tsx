@@ -1,4 +1,4 @@
-import { useState, FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Eye, EyeOff, Loader2, CheckCircle, MessageCircleQuestion } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -69,7 +69,7 @@ export default function LoginPage() {
               className="flex items-center gap-3 px-4 py-3 rounded-xl mb-6"
               style={{ backgroundColor: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)' }}
             >
-              <CheckCircle size={18} style={{ color: '#22c55e', shrink: 0 }} />
+              <CheckCircle size={18} style={{ color: '#22c55e', flexShrink: 0 }} />
               <p className="text-sm font-medium" style={{ color: '#22c55e' }}>
                 Cont creat cu succes! Intră cu datele tale.
               </p>

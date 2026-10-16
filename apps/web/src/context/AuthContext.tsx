@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 import { api, setAccessToken, refreshAccessToken } from '../lib/api';
 
 export type Role = 'ELEV' | 'ANTREPRENOR' | 'ADMIN';

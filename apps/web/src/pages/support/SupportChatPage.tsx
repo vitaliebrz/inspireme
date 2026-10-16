@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, FormEvent } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, type FormEvent } from 'react';
 import { Send, Loader2, MessageCircleQuestion, CheckCheck, HeadphonesIcon } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';

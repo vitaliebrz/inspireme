@@ -1,0 +1,41 @@
+# Netlify — doar frontend-ul (apps/web). API-ul rulează pe Render (vezi render.yaml),
+# iar Netlify îl servește pe același domeniu prin proxy-ul /api/* de mai jos.
+# Astfel cookie-ul httpOnly de refresh e first-party (Safari/iOS blochează cookie-urile
+# cross-site, ceea ce i-ar deloga pe utilizatori la fiecare refresh de pagină).
+
+[build]
+  base = "apps/web"
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+  # Relativ → trece prin proxy-ul de mai jos
+  VITE_API_URL = "/api/v1"
+  # WebSocket-ul nu poate trece prin proxy-ul Netlify → se conectează direct la Render.
+  # Dacă serviciul Render are alt URL, schimbă-l aici ȘI în redirect-ul /api/*.
+  VITE_SOCKET_URL = "https://inspireme-api.onrender.com"
+
+[[redirects]]
+  from = "/api/*"
+  to = "https://inspireme-api.onrender.com/api/:splat"
+  status = 200
+  force = true
+
+# SPA — toate rutele React Router servesc index.html
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Asset-urile Vite au hash în nume → se pot cache-ui permanent
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Service worker-ul trebuie verificat la fiecare vizită, altfel update-urile nu ajung
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"

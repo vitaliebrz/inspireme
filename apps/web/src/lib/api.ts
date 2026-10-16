@@ -7,6 +7,12 @@ const BASE_URL = import.meta.env['VITE_API_URL'] ?? (
     : DEFAULT_API_URL
 );
 
+// Socket.io trebuie să primească doar originea (fără /api/v1 — altfel calea e tratată
+// ca namespace și conexiunea eșuează). VITE_SOCKET_URL e necesar în producție, când API-ul
+// e servit relativ prin proxy-ul Netlify, iar WebSocket-ul merge direct la backend.
+export const SOCKET_URL: string = import.meta.env['VITE_SOCKET_URL']
+  ?? new URL(BASE_URL, typeof window !== 'undefined' ? window.location.href : DEFAULT_API_URL).origin;
+
 // ─────────────────────────────────────────────
 // ACCESS TOKEN — ținut DOAR în memorie (nu în localStorage) → imun la furt prin XSS.
 // Refresh token-ul stă într-un cookie httpOnly (invizibil pentru JavaScript), trimis

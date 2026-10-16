@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, FormEvent } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Send, Paperclip, Flag, ArrowLeft, Loader2, MessageSquare, Handshake, TrendingUp, Search, X, MoreVertical, BellOff, Bell, Check, CheckCheck, Users, UserPlus, Pencil, SquarePen, CornerUpLeft, ArrowDown, Camera, HeadphonesIcon, Lightbulb, Download } from 'lucide-react';
@@ -313,7 +313,7 @@ function renderFileMessage(
   );
 }
 
-type ApiError = { response?: { data?: { error?: string } } };
+type ApiError = { response?: { status?: number; data?: { error?: string } } };
 
 export default function ChatPage() {
   const { conversationId } = useParams<{ conversationId?: string }>();
@@ -529,9 +529,7 @@ export default function ChatPage() {
     const other = conv.participantA.id === myId ? conv.participantB : conv.participantA;
     const p = other.role === 'ELEV' ? other.profileElev : other.profileAntreprenor;
     const name = p ? `${p.firstName} ${p.lastName}` : 'Utilizator';
-    const sub = other.role === 'ANTREPRENOR' && 'company' in (p ?? {})
-      ? (p as { company: string | null }).company ?? ''
-      : '';
+    const sub = p && 'company' in p ? (p.company as string | null) ?? '' : '';
     return {
       id: other.id,
       name,
@@ -763,7 +761,7 @@ export default function ChatPage() {
       if (convId && convId !== conversationId) void loadConvs();
     };
     socket.on('notification:new', handleNotif);
-    return () => socket.off('notification:new', handleNotif);
+    return () => { socket.off('notification:new', handleNotif); };
   }, [socket, conversationId, loadConvs]);
 
   // Actualizare preview sidebar + contor local pentru mesaje în conversații inactive
@@ -795,7 +793,7 @@ export default function ChatPage() {
       }
     };
     socket.on('message:new', handleMsgPreview);
-    return () => socket.off('message:new', handleMsgPreview);
+    return () => { socket.off('message:new', handleMsgPreview); };
   }, [socket, conversationId, user?.id]);
 
   // Listener typing — socket-ul e deja conectat global (SocketContext)
@@ -940,7 +938,7 @@ export default function ChatPage() {
       }
     };
     socket.on('group:message:new', handleGroupMsgGlobal);
-    return () => socket.off('group:message:new', handleGroupMsgGlobal);
+    return () => { socket.off('group:message:new', handleGroupMsgGlobal); };
   }, [socket, activeGroupId, markGroup, user?.id]);
 
   // Join/leave group room + actualizări metadata grup (redenumire, avatar, membri)

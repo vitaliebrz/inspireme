@@ -1,0 +1,60 @@
+# Render Blueprint — API-ul InspireMe (Express + Socket.io + joburi programate).
+# Render → New → Blueprint → alege repo-ul. Variabilele cu sync: false se completează
+# în dashboard (valorile din apps/api/.env, NU le pune aici).
+services:
+  - type: web
+    name: inspireme-api
+    runtime: node
+    plan: free
+    region: frankfurt
+    rootDir: apps/api
+    branch: main
+    # --include=dev: tsc și prisma sunt devDependencies, necesare la build
+    buildCommand: npm ci --include=dev && npx prisma generate && npm run build
+    preDeployCommand: npx prisma migrate deploy
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      # Joburile zilnice rulează la 02:00 ora României, nu UTC
+      - key: TZ
+        value: Europe/Bucharest
+      - key: FRONTEND_URL
+        sync: false
+      - key: APP_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_ELEV_MONTHLY_PRICE_ID
+        sync: false
+      - key: STRIPE_ELEV_YEARLY_PRICE_ID
+        sync: false
+      - key: STRIPE_ANTREPRENOR_MONTHLY_PRICE_ID
+        sync: false
+      - key: STRIPE_ANTREPRENOR_YEARLY_PRICE_ID
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM
+        sync: false

@@ -1,11 +1,8 @@
-import { useState, useEffect, useLayoutEffect, useRef, FormEvent } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, type FormEvent } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { Send, Loader2, HeadphonesIcon, CheckCheck, AlertCircle } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
-import { api } from '../../lib/api';
-
-const API_URL = (import.meta as unknown as { env: Record<string, string> }).env['VITE_API_URL']
-  ?? `${window.location.protocol}//${window.location.hostname}:4000`;
+import { api, SOCKET_URL } from '../../lib/api';
 
 interface PublicMsg {
   id: string;
@@ -67,7 +64,7 @@ export default function SupportReplyPage() {
   useEffect(() => {
     if (!tid) return;
 
-    const s = io(API_URL, {
+    const s = io(SOCKET_URL, {
       auth: { token: '' },
       withCredentials: true,
     });

@@ -1,4 +1,4 @@
-import { useState, useEffect, FormEvent, useRef } from 'react';
+import { useState, useEffect, type FormEvent, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   X, FileText, Loader2, ImageIcon, Globe, Lock,

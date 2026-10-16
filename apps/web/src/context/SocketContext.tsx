@@ -2,10 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAuth } from './AuthContext';
-import { getAccessToken, refreshAccessToken } from '../lib/api';
-
-const API_URL = (import.meta as unknown as { env: Record<string, string> }).env['VITE_API_URL']
-  ?? `${window.location.protocol}//${window.location.hostname}:4000`;
+import { getAccessToken, refreshAccessToken, SOCKET_URL } from '../lib/api';
 
 interface SocketContextValue {
   socket: Socket | null;
@@ -34,7 +31,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
     // auth ca funcție → la fiecare (re)conectare folosim access token-ul CURENT din memorie.
     // Dacă lipsește (ex. a expirat), îl reîmprospătăm prin cookie înainte de conectare.
-    const s = io(API_URL, {
+    const s = io(SOCKET_URL, {
       auth: async (cb) => {
         let token = getAccessToken();
         if (!token) { try { token = await refreshAccessToken(); } catch { token = null; } }

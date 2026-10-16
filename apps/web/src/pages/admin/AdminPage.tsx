@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, FormEvent } from 'react';
+﻿import { useState, useEffect, type FormEvent } from 'react';
 import { Routes, Route, NavLink, Link, useSearchParams, useNavigate } from 'react-router-dom';
 import {
   BarChart2, Users, Flag, ShieldOff, Loader2, Search,
@@ -784,6 +784,8 @@ interface LogEntry {
   raw?: Record<string, unknown>;
 }
 
+type LogField = [string, string | number | null | undefined];
+
 const LEVEL_STYLE: Record<string, { label: string; color: string; bg: string; Icon: typeof Info }> = {
   error: { label: 'Eroare', color: '#ef4444', bg: 'rgba(239,68,68,0.12)', Icon: AlertCircle },
   warn:  { label: 'Atenție', color: '#f6a623', bg: 'rgba(246,166,35,0.12)', Icon: AlertTriangle },
@@ -1211,7 +1213,7 @@ function LogsPanel() {
       {/* Modal detaliu log (stil Kibana — document view) */}
       {detail && (() => {
         const st = LEVEL_STYLE[detail.level] ?? LEVEL_STYLE['info']!;
-        const fields: [string, string | number | null | undefined][] = [
+        const fields = ([
           ['@timestamp', new Date(detail.time).toLocaleString('ro-RO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })],
           ['level', detail.level],
           ['method', detail.method],
@@ -1230,7 +1232,7 @@ function LogsPanel() {
           ['code', detail.code],
           ['err.type', detail.err?.type],
           ['err.message', detail.err?.message],
-        ].filter(([, v]) => v !== null && v !== undefined && v !== '');
+        ] as LogField[]).filter(([, v]) => v !== null && v !== undefined && v !== '');
         const jsonBlock = (label: string, val: unknown) =>
           val != null && typeof val === 'object' && Object.keys(val as object).length > 0 ? (
             <div className="mt-3">
@@ -1375,7 +1377,7 @@ function LogsPanel() {
               {/* Sumar cerere (stil Kibana) — câmpuri detaliate */}
               {(() => {
                 const meta = flow.find((e) => e.method || e.ip) ?? flow[0]!;
-                const rows: [string, string | number | null | undefined][] = [
+                const rows = ([
                   ['Metodă', meta.method],
                   ['Rută', meta.path],
                   ['Status', meta.statusCode],
@@ -1388,7 +1390,7 @@ function LogsPanel() {
                   ['HTTP', meta.httpVersion],
                   ['Mediu', meta.env],
                   ['User-Agent', meta.userAgent],
-                ].filter(([, v]) => v !== null && v !== undefined && v !== '');
+                ] as LogField[]).filter(([, v]) => v !== null && v !== undefined && v !== '');
                 return (
                   <div className="rounded-xl p-3 mb-4" style={{ backgroundColor: 'var(--bg-3)' }}>
                     <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">

@@ -16,6 +16,8 @@ export default defineConfig({
       manifest: false, // folosim manifest.json din public/
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // /api/* e proxy-at de Netlify către backend — SW-ul nu trebuie să servească index.html acolo
+        navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,

@@ -1,4 +1,4 @@
-import { useState, FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { api } from '../../lib/api';

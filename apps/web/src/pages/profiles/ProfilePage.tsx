@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, FormEvent } from 'react';
+import { useState, useEffect, useRef, type FormEvent } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   Globe, Crown, BookOpen, ArrowLeft,
@@ -161,7 +161,6 @@ export default function ProfilePage() {
   const [deleting, setDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [weeklyViews, setWeeklyViews] = useState<NonNullable<ElevProfile['weeklyViews']>>([]);
-  const [recentActivity, setRecentActivity] = useState<NonNullable<ElevProfile['recentActivity']>>([]);
 
   const isOwn = !id || id === user?.id;
   const endpoint = isOwn ? '/profiles/me' : `/profiles/${id}`;
@@ -188,11 +187,10 @@ export default function ProfilePage() {
     if (activeTab !== 'analytics' || profile.plan !== 'PRO') return;
 
     let cancelled = false;
-    api.get<{ weeklyViews: ElevProfile['weeklyViews']; recentActivity: ElevProfile['recentActivity'] }>('/profiles/me/analytics')
+    api.get<{ weeklyViews: ElevProfile['weeklyViews'] }>('/profiles/me/analytics')
       .then(({ data }) => {
         if (!cancelled) {
           setWeeklyViews(data.weeklyViews ?? []);
-          setRecentActivity(data.recentActivity ?? []);
         }
       })
       .catch(() => {});

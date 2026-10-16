@@ -67,7 +67,7 @@ export function RichTextEditor({ value, onChange, placeholder, minHeight = 120 }
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
     if (value !== editor.getHTML()) {
-      editor.commands.setContent(value || '', false);
+      editor.commands.setContent(value || '', { emitUpdate: false });
     }
   }, [editor, value]);
 
